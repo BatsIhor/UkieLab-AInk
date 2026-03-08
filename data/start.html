@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AInk - Get Started</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 500px; margin: 0 auto; }
+        header { text-align: center; margin-bottom: 24px; }
+        header h1 { font-size: 24px; color: #4fc3f7; margin-bottom: 4px; }
+        header .subtitle { color: #888; font-size: 14px; }
+        .card {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .card h2 {
+            color: #4fc3f7;
+            margin-bottom: 12px;
+            font-size: 16px;
+        }
+        .card p {
+            color: #ccc;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+        .prompt-box {
+            background: rgba(0, 0, 0, 0.4);
+            border: 2px solid rgba(79, 195, 247, 0.3);
+            border-radius: 8px;
+            padding: 16px;
+            font-size: 15px;
+            line-height: 1.6;
+            color: #fff;
+            cursor: pointer;
+            position: relative;
+            transition: border-color 0.2s;
+        }
+        .prompt-box:hover { border-color: #4fc3f7; }
+        .copy-btn {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            background: #4fc3f7;
+            color: #1a1a2e;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 12px;
+            transition: background 0.2s;
+        }
+        .copy-btn:hover { background: #81d4fa; }
+        .copy-btn.copied { background: #66bb6a; }
+        .links { text-align: center; margin-top: 8px; }
+        .links a {
+            display: inline-block;
+            color: #4fc3f7;
+            text-decoration: none;
+            font-size: 14px;
+            padding: 8px 16px;
+            border: 1px solid rgba(79, 195, 247, 0.3);
+            border-radius: 20px;
+            margin: 4px;
+            transition: background 0.2s;
+        }
+        .links a:hover { background: rgba(79, 195, 247, 0.15); }
+        .notice {
+            background: rgba(255, 152, 0, 0.12);
+            border: 1px solid rgba(255, 152, 0, 0.4);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #ffcc80;
+        }
+        .notice strong { color: #ffb74d; }
+        .info { color: #888; font-size: 12px; text-align: center; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AInk</h1>
+            <p class="subtitle">AI-First E-Ink Display</p>
+        </header>
+
+        <div class="notice">
+            <strong>Desktop only.</strong> The AI needs access to your local network to reach this device. Mobile apps (Claude, ChatGPT, etc.) run in the cloud and cannot discover devices on your WiFi. Use <strong>Claude Desktop</strong>, <strong>Claude Code</strong>, or any AI agent running on a computer connected to the same network.
+        </div>
+
+        <div class="card">
+            <h2>Copy this prompt into a desktop AI assistant</h2>
+            <div class="prompt-box" id="prompt" onclick="copyPrompt()">
+                <span id="promptText"></span>
+            </div>
+            <button class="copy-btn" id="copyBtn" onclick="copyPrompt()">Copy Prompt</button>
+        </div>
+
+        <p class="info">
+            Device IP: <span id="deviceIp"></span><br>
+            Paste the prompt into a desktop AI app on the same network as this device.
+        </p>
+    </div>
+
+    <script>
+        var ip = window.location.hostname;
+        document.getElementById('deviceIp').textContent = ip;
+        var promptText = 'I have a AInk AI Canvas e-ink display at http://' + ip + '. '
+            + '"Discover device at ' + ip + ', '
+            + 'read instructions on how to use the device, '
+            + 'and show me something useful.'
+            + 'once rendered check to see if it is displayed correctly';
+        document.getElementById('promptText').textContent = promptText;
+
+        function copyPrompt() {
+            var text = document.getElementById('promptText').textContent;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done).catch(fallback);
+            } else {
+                fallback();
+            }
+        }
+
+        function fallback() {
+            var ta = document.createElement('textarea');
+            ta.value = document.getElementById('promptText').textContent;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            done();
+        }
+
+        function done() {
+            var btn = document.getElementById('copyBtn');
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(function() {
+                btn.textContent = 'Copy Prompt';
+                btn.classList.remove('copied');
+            }, 2000);
+        }
+    </script>
+</body>
+</html>

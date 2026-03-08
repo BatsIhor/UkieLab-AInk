@@ -1,0 +1,273 @@
+================================================================================
+THIRD-PARTY SOFTWARE LICENSES
+================================================================================
+
+This file lists all third-party software components used in the UkieLab-Canvas
+project, along with their respective licenses and copyright information.
+
+================================================================================
+1. ArduinoJson
+================================================================================
+   Author:     Benoit Blanchon (bblanchon)
+   Repository: https://github.com/bblanchon/ArduinoJson
+   License:    MIT License
+   Version:    ^6.19.4
+
+   Copyright (c) Benoit Blanchon
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+================================================================================
+2. ESP_MultiResetDetector
+================================================================================
+   Author:     Khoi Hoang (khoih-prog)
+   Repository: https://github.com/khoih-prog/ESP_MultiResetDetector
+   License:    MIT License
+   Version:    ^1.3.1
+
+   Copyright (c) Khoi Hoang
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+================================================================================
+3. ESPAsyncWebServer-esphome
+================================================================================
+   Author:     ESPHome / Originally by Hristo Gochkov
+   Repository: https://github.com/esphome/ESPAsyncWebServer
+   License:    GNU Lesser General Public License v3.0 (LGPL-3.0)
+   Version:    ^3.1.0
+
+   This library is free software; you can redistribute it and/or modify it
+   under the terms of the GNU Lesser General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or (at
+   your option) any later version.
+
+   This library is distributed in the hope that it will be useful, but
+   WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+   General Public License for more details.
+
+   The full text of the LGPL-3.0 is available at:
+   https://www.gnu.org/licenses/lgpl-3.0.en.html
+
+   LGPL-3.0 Compliance Note:
+   The complete source code of this project is publicly available, enabling
+   users to modify and rebuild the firmware with an alternative or modified
+   version of the ESPAsyncWebServer library, in accordance with LGPL-3.0
+   requirements.
+
+================================================================================
+4. PNGdec
+================================================================================
+   Author:     Larry Bank (bitbank2)
+   Repository: https://github.com/bitbank2/PNGdec
+   License:    Apache License 2.0
+   Version:    ^1.0.1
+
+   Copyright (c) Larry Bank
+
+   Licensed under the Apache License, Version 2.0 (the "License"); you may
+   not use this file except in compliance with the License. You may obtain
+   a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+================================================================================
+5. QRCode
+================================================================================
+   Author:     Richard Moore (ricmoo)
+   Repository: https://github.com/ricmoo/QRCode
+   License:    MIT License
+   Version:    ^0.0.1
+
+   Copyright (c) Richard Moore
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+================================================================================
+6. Adafruit-GFX-Font-Customiser
+================================================================================
+   Author:     tchap
+   Repository: https://github.com/tchapi/Adafruit-GFX-Font-Customiser
+   License:    MIT License
+   Location:   Fonts/Adafruit-GFX-Font-Customiser-master/
+
+   Copyright (c) 2017 tchap
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+================================================================================
+7. Adafruit GFX Library (gfxfont.h struct layout)
+================================================================================
+   Author:     Adafruit Industries
+   Repository: https://github.com/adafruit/Adafruit-GFX-Library
+   License:    BSD License
+   Note:       The GFXfont / GFXglyph struct layout used in
+               lib/EPD_Custom/gfxfont.h is binary-compatible with the
+               Adafruit_GFX library format.
+
+   Copyright (c) 2012 Adafruit Industries. All rights reserved.
+
+   Redistribution and use in source and binary forms, with or without
+   modification, are permitted provided that the following conditions are met:
+   - Redistributions of source code must retain the above copyright notice,
+     this list of conditions and the following disclaimer.
+   - Redistributions in binary form must reproduce the above copyright notice,
+     this list of conditions and the following disclaimer in the documentation
+     and/or other materials provided with the distribution.
+
+   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+   THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+8. GNU FreeFont (FreeSans, FreeSansBold, FreeMonoBold)
+================================================================================
+   Author:     GNU Project / Primoz Peterlin, Steve White
+   Website:    https://www.gnu.org/software/freefont/
+   License:    GNU General Public License v3.0 with Font Exception
+   Location:   lib/EPD_Custom/Fonts/ (pre-rendered bitmap headers)
+
+   Copyright (C) 2002-2012 GNU Freefont contributors.
+
+   This font is free software: you can redistribute it and/or modify it
+   under the terms of the GNU General Public License as published by the
+   Free Software Foundation, either version 3 of the License, or (at your
+   option) any later version.
+
+   This font is distributed in the hope that it will be useful, but WITHOUT
+   ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+   FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+   more details.
+
+   As a special exception, if you create a document which uses this font,
+   and embed this font or unaltered portions of this font into the document,
+   this font does not by itself cause the resulting document to be covered
+   by the GNU General Public License. This exception does not however
+   invalidate any other reasons why the document might be covered by the
+   GNU General Public License. If you modify this font, you may extend this
+   exception to your version of the font, but you are not obliged to do so.
+
+   The full text of the GPL-3.0 is available at:
+   https://www.gnu.org/licenses/gpl-3.0.en.html
+
+================================================================================
+9. Open Sans Font
+================================================================================
+   Author:     Steve Matteson
+   Website:    https://fonts.google.com/specimen/Open+Sans
+   License:    Apache License 2.0 / SIL Open Font License 1.1
+   Location:   Fonts/OpenSans-Bold.ttf
+
+   Copyright (c) Steve Matteson
+
+   Licensed under the Apache License, Version 2.0 (the "License"); you may
+   not use this file except in compliance with the License. You may obtain
+   a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+10. fontconvert.py (epdiy-derived)
+================================================================================
+    Author:     vroland / epdiy project (modified)
+    Repository: https://github.com/vroland/epdiy
+    License:    MIT License
+    Location:   Fonts/fontconvert.py
+
+    The fontconvert.py script is derived from the epdiy project's font
+    conversion utility. The epdiy project's scripts are licensed under
+    the MIT License.
+
+================================================================================
+11. Arduino / ESP32 Framework
+================================================================================
+    Author:     Espressif Systems
+    Repository: https://github.com/espressif/arduino-esp32
+    License:    GNU Lesser General Public License v2.1 (LGPL-2.1)
+
+    The Arduino core for ESP32 is licensed under the LGPL-2.1. The complete
+    source code of this project is publicly available, enabling users to
+    modify and rebuild the firmware with an alternative or modified version
+    of the Arduino/ESP32 framework.
+
+    The full text of the LGPL-2.1 is available at:
+    https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html

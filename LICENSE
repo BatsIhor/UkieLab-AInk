@@ -1,0 +1,112 @@
+UkieLab Non-Commercial License v1.0
+
+Copyright (c) 2024-2026 Ihor Bats / UkieLab (https://ukielab.com)
+
+TERMS AND CONDITIONS
+
+1. DEFINITIONS
+
+   "Software" means the source code, object code, documentation, and any
+   associated files in this repository.
+
+   "Device" means any physical hardware product that runs, incorporates, or
+   is designed to operate with the Software.
+
+   "Commercial Use" means any use of the Software or Device intended for or
+   directed toward commercial advantage or monetary compensation. This
+   includes, but is not limited to: selling, licensing, renting, or leasing
+   the Software or any Device; offering paid services based on the Software;
+   or incorporating the Software into a product or service that is sold or
+   offered for a fee.
+
+   "Personal Use" means use by an individual for private, non-commercial
+   purposes, including hobby projects, education, and research, where no
+   commercial advantage or monetary compensation is sought.
+
+   "Licensor" means Ihor Bats / UkieLab (https://ukielab.com).
+
+2. GRANT OF RIGHTS
+
+   Subject to the terms of this License, the Licensor grants you a
+   worldwide, royalty-free, non-exclusive, non-transferable license to:
+
+   a) View, study, and learn from the Software.
+
+   b) Use, copy, and modify the Software for Personal Use only.
+
+   c) Build Devices using the Software for Personal Use only.
+
+   d) Redistribute the Software (in original or modified form) for
+      non-commercial purposes, provided that:
+      - This License and copyright notice are included in all copies
+        or substantial portions of the Software.
+      - Modified versions are clearly marked as such.
+      - You do not misrepresent the origin of the Software.
+
+3. RESTRICTIONS
+
+   Unless you have received prior written permission from the Licensor,
+   you may NOT:
+
+   a) Use the Software or any Device for Commercial Use.
+
+   b) Sell, offer for sale, rent, lease, or otherwise commercially
+      distribute Devices that incorporate or run the Software.
+
+   c) Sell, sublicense, or commercially distribute the Software, whether
+      in original or modified form.
+
+   d) Incorporate the Software into any commercial product or service.
+
+   e) Use the Software to provide commercial services to third parties.
+
+   f) Remove or alter this License, copyright notices, or attribution
+      from the Software.
+
+4. COMMERCIAL LICENSING
+
+   If you wish to use the Software for Commercial Use, including but not
+   limited to selling Devices based on this Software, you must obtain a
+   separate commercial license from the Licensor.
+
+   Contact: https://ukielab.com or the contact information provided in
+   the project repository.
+
+5. THIRD-PARTY COMPONENTS
+
+   This Software includes third-party components under their own licenses.
+   See the THIRD_PARTY_LICENSES file for details. Nothing in this License
+   is intended to limit or alter the rights granted under those third-party
+   licenses.
+
+6. CONTRIBUTIONS
+
+   By submitting contributions (pull requests, patches, etc.) to this
+   project, you agree to license your contributions under the same terms
+   as this License and assign the Licensor the right to relicense your
+   contributions, including for commercial purposes.
+
+7. DISCLAIMER OF WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+8. LIMITATION OF LIABILITY
+
+   IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
+
+9. TERMINATION
+
+   This License and the rights granted hereunder will terminate
+   automatically if you fail to comply with any of the terms herein. Upon
+   termination, you must destroy all copies of the Software in your
+   possession.
+
+10. GOVERNING LAW
+
+    This License shall be governed by and construed in accordance with
+    applicable law, without regard to conflict of law principles.

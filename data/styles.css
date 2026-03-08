@@ -1,0 +1,154 @@
+body {
+  margin-bottom: 60px; /* Adjust margin to make space for the footer */
+}
+
+.App {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  font: 400 .777em Arial;
+  font-weight: 700;
+  padding: 0 20px 20px
+}
+
+.App,.btn {
+  text-align: center
+}
+
+.btn {
+  background: #424242;
+  border: 5px solid;
+  color: #fff;
+  font-size: 20px;
+  padding: 20px
+}
+
+.btn-block {
+  display: block;
+  width: 100%
+}
+
+ul {
+  padding-inline-start: 0px;
+}
+
+.btn-li {
+  background: #bcbcbc;
+  color: #333333;
+  display: block;
+}
+
+.btn-li.selected
+{
+  background: #313131;
+  color: #FFFFFF
+}
+
+.btn-url-block {
+  display: block;
+  text-decoration: none
+}
+
+.btn:hover {
+  background: #6d6d6d
+}
+
+.ssids-container .btn {
+  margin-bottom: 10px
+}
+
+.input {
+  border: 5px solid;
+  box-sizing: border-box;
+  font: 400 1.5em Arial;
+  font-weight: 700;
+  line-height: 1.5;
+  outline: none;
+  padding: 0.5rem 0.5rem;
+  width: 15rem
+}
+
+
+input[type="radio"] {
+  opacity: 0;
+  position: fixed;
+  width: 0;
+}
+
+input[type="radio"] + label {
+  display: inline-block;
+  background-color: rgb(212, 212, 212);
+  padding: 10px 20px;
+  font-size: 16px;
+  color: #000000
+}
+
+input[type="radio"]:checked + label {
+  display: inline-block;
+  /*background-color: #ddd;*/
+  padding: 10px 20px;
+  font-size: 16px;
+  border: 5px solid rgb(0, 0, 0);
+  /*background-color:#424242;*/
+  border-color: rgb(0, 0, 0);
+  /*color: #fff;*/
+}
+
+.form {
+  padding-bottom: 10px
+}
+
+.form .input {
+  margin-bottom: 10px
+}
+
+.hidden {
+  display: none
+}
+
+.error {
+  background: #c9c9c9;
+  border: 5px solid red;
+  box-sizing: border-box;
+  font-size: 20px;
+  padding: 20px;
+  width: 15rem
+}
+
+.text-center {
+  text-align: center
+}
+
+.footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font: 400 1.5em Arial;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 60px;
+  background-color: #f0f0f0;
+  padding: 10px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.footer a {
+  display: inline-block;
+  padding: 8px 16px;
+  background-color: #333;
+  color: white;
+  text-decoration: none;
+  transition: background-color 0.3s;
+  margin: 0 10px;
+}
+
+.footer a:hover {
+  background-color: #555;
+}
+
+.footer i {
+  margin-right: 5px;
+}

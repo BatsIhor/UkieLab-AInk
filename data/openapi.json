@@ -1,0 +1,424 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "AI Canvas E-Ink Display API",
+    "description": "HTTP API for controlling a 7.5\" B/W e-ink display (800x480 pixels). Send JSON drawing commands to render text, shapes, and images. Coordinate system: (0,0) is top-left, x is horizontal (0-799), y is vertical (0-479).",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/device": {
+      "get": {
+        "summary": "Get device capabilities",
+        "description": "Returns display dimensions, supported operations, available fonts, and network info. IMPORTANT: The response includes an 'instructions' field -- read it before sending any drawing commands. You MUST use validate:true on every POST /canvas and check the validation response for text_overlaps and off_screen issues.",
+        "responses": {
+          "200": {
+            "description": "Device info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "model": { "type": "string" },
+                    "version": { "type": "string" },
+                    "display": {
+                      "type": "object",
+                      "properties": {
+                        "width": { "type": "integer", "example": 800 },
+                        "height": { "type": "integer", "example": 480 },
+                        "colorDepth": { "type": "integer", "example": 1 },
+                        "colors": { "type": "string", "example": "B/W" }
+                      }
+                    },
+                    "operations": { "type": "array", "items": { "type": "string" } },
+                    "fonts": {
+                      "type": "array",
+                      "description": "Available fonts with metrics for layout planning",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "family": { "type": "string" },
+                          "size": { "type": "integer" },
+                          "bold": { "type": "boolean" },
+                          "yAdvance": { "type": "integer", "description": "Vertical advance in pixels. This is the key metric for layout: text block height = N_lines * floor(yAdvance * lineHeight)" },
+                          "lineHeight": { "type": "integer", "description": "Default line height in pixels (yAdvance * 1.2)" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/canvas": {
+      "post": {
+        "summary": "Render drawing commands",
+        "description": "Execute an array of drawing commands on the display. Commands are processed in order. The display refreshes after all commands complete (~2-3 seconds for full refresh). Returns 429 if a refresh is already in progress; retry after 3 seconds.\n\nRENDERING MODEL:\nCoordinate system: (0,0) is top-left. x horizontal (0-799), y vertical (0-479). Commands render sequentially — later commands overwrite earlier ones (no transparency). Each pixel is either black or white. Without a 'clear' command, new commands draw on top of whatever is already on the display. Include 'clear' as the first command to start fresh.\n\nCHARACTER SET:\nFonts support ASCII 0x20-0x7E only (space through ~). Do NOT use unicode, degree symbols, em dashes, curly quotes, or emoji — they will render as missing glyphs. Use alternatives: 'F' not '°F', '--' not '—', plain quotes not smart quotes.\n\nCOLORS:\n'black' or 'white'. Default is black for drawing ops, white for clear.\n\nOPERATIONS REFERENCE:\n\n- clear: {color} - Clear entire display. Default color: white.\n- pixel: {x, y, color} - Single pixel.\n- line: {x0, y0, x1, y1, color, thickness} - Line between two points. thickness default: 1. Also accepts x/y as aliases for x0/y0.\n- rect: {x, y, w, h, color, fill, radius, stroke, strokeWidth} - Rectangle. fill defaults to TRUE (solid filled). Set fill:false for outline only. radius (rounded corners) only works when fill:true — outlines are always square. stroke/strokeWidth draw a border on top of the fill in a different color.\n- circle: {x, y, r, color, fill} - Circle centered at (x,y). fill default: true.\n- ellipse: {x, y, rx, ry, color, fill} - Ellipse centered at (x,y). fill default: true.\n- arc: {x, y, r, startAngle, endAngle, color} - Arc centered at (x,y). Angles in degrees: 0=right(east), increases clockwise. Draws a 1px outline only, no fill or thickness.\n- polygon: {points:[{x,y},...], color, fill} - Polygon, min 3 points, max 64. fill default: true. Outline is always drawn even when filled.\n- polyline: {points:[{x,y},...], color} - Connected line segments, min 2 points, max 64. No thickness support.\n- text: See TEXT LAYOUT section below.\n- image: {x, y, w, h, data, dither} - PNG image. data: base64-encoded PNG. w/h: target display size (image is scaled). dither: 'threshold'|'ordered'|'floyd_steinberg', default 'ordered'. Uses ~48KB RAM during decode.\n- gradient: {x, y, w, h, direction, from, to} - Dithered gradient. direction: 'horizontal'(default)|'vertical'. from default: black, to default: white.\n- flood_fill: {x, y, color} - Flood fill from seed point. WARNING: internal queue limited to 4096 pixels — large area fills will be incomplete. Use rect for large solid areas instead.\n- clip: {x, y, w, h} - Set clipping rectangle. All subsequent drawing is confined to this rect. Only one clip active at a time (new clip replaces old).\n- unclip: {} - Remove clipping rectangle.\n- raw_bitmap: {x, y, w, h, data} - 1-bit bitmap. data: base64-encoded packed bits. MSB is leftmost pixel, rows padded to byte boundaries. Bit value: 1=white, 0=black.\n- qr: {x, y, size, data, color, ec} - QR code. x,y=top-left corner. size=square dimension in pixels (modules scale to fit). data=string to encode (URL, text, etc). ec: error correction 'L'|'M'(default)|'Q'|'H'. Includes 2-module quiet zone.\n\nMETADATA:\nAny command can include an optional 'meta' object with freeform key-value pairs. Metadata is stored and returned by GET /canvas, enabling multi-agent coordination. Example: {\"op\":\"text\",\"x\":30,\"y\":72,\"text\":\"72F\",\"meta\":{\"type\":\"weather\",\"source\":\"weather-agent\"}}. Frame-level metadata can be set in the request object: {\"commands\":[...],\"meta\":{\"agent\":\"my-agent\"}}.\n\nTEXT MEASUREMENT:\nUse POST /measure to get pixel-perfect text dimensions before rendering. Supports batch mode (array of requests). Returns {width, height, lines, truncated, yAdvance, lineHeight}.\n\nTEXT LAYOUT — CRITICAL FOR CORRECT POSITIONING:\n\nFonts: 'sans' (9/12/18/24pt, regular+bold), 'mono' (9pt bold only). Default when omitted: sans 12pt regular. Nearest available font is used if exact match not found.\n\nFont metrics (use these to calculate vertical spacing):\n  sans  9pt: yAdvance=22px, default line height=26px\n  sans 12pt: yAdvance=29px, default line height=34px\n  sans 18pt: yAdvance=42px, default line height=50px\n  sans 24pt: yAdvance=56px, default line height=67px\n  mono  9pt: yAdvance=18px, default line height=21px\n\nThe y parameter is the TOP of the text block. However, the first line's baseline is placed at y + yAdvance. This means visible glyph pixels start at approximately y + 0.6 * yAdvance (for capitals). The TOTAL HEIGHT of a text block with N lines is: N * floor(yAdvance * lineHeight).\n\nText supports newline characters (\\n) for manual line breaks within a single text command.\n\nSpacing rules to PREVENT OVERLAPS:\n1. Next element below text: next_y >= text_y + N_lines * floor(yAdvance * lineHeight)\n2. Text inside a filled rect: rect height must be >= yAdvance. Set text y = rect_y for bottom-aligned text. For visually centered text, set text y = rect_y - (yAdvance - rect_h) / 3. Negative y values are safe — pixels above the screen are clipped. Example: 60px bar at y=0 with size 24 (yAdvance=56): set text y=-10 to center visually.\n3. Align shapes (circles, rects as bullets) vertically with adjacent text: set shape_center_y = text_y + 0.8 * yAdvance. Example: text at y=100 size 12 (yAdvance=29) — place a bullet circle at cy=123.\n4. Align different-sized text on the same baseline: set y values so y_a + yAdvance_a == y_b + yAdvance_b.\n5. Estimate line count for wrapped text: chars_per_line ~ maxWidth / (yAdvance * 0.45) for sans.\n\nAlignment: Without maxWidth, x is the anchor point (left edge for 'left', center point for 'center', right edge for 'right'). With maxWidth, x is always the LEFT edge of the text box and text aligns within that box.\n\nvalign ('top'|'middle'|'bottom'): Only effective when maxHeight is also set. Without maxHeight, valign has no effect.\n\noverflow:\n- 'clip' (default): Lines beyond maxHeight are hidden.\n- 'truncate': Last visible line gets '...' appended.\n- 'shrink': Automatically tries smaller fonts (24->18->12->9 sans regular) to fit. Note: bold is lost when shrinking.\n\nCOMMON MISTAKES (read this before rendering):\\n1. ALWAYS compute text block height before placing the next element: block_h = num_lines * floor(yAdvance * lineHeight). Next element y >= prev_y + block_h.\\n2. ALWAYS estimate wrapped line count when using maxWidth: num_lines = ceil(char_count / floor(maxWidth / (yAdvance * 0.45))). Account for manual \\\\n adding extra lines.\\n3. NEVER set maxHeight smaller than the text needs — it silently clips lines. Required: maxHeight >= num_lines * floor(yAdvance * lineHeight).\\n4. NEVER eyeball y positions — calculate every y from the previous element's y + block_h.\\n5. Keep status bar text short — long strings get clipped at display edge (800px).\\n\\nBATCHED RENDERING:\nFor complex scenes (many commands or polyline/polygon points), split into multiple smaller requests with refresh:'none', then send a final request with refresh:'full'. Each batch draws to the framebuffer without refreshing. The final batch triggers one display refresh. Example: batch 1 draws header (refresh:'none'), batch 2 draws chart (refresh:'none'), batch 3 draws footer (refresh:'full'). Always include 'clear' only in the FIRST batch.\n\nPRACTICAL LIMITS:\n- Max JSON payload: ~32KB (not the 2MB HTTP limit — the JSON parser buffer is 32KB).\n- Max polygon/polyline points: 64.\n- Flood fill queue: 4096 pixels.\n- E-ink refresh: ~2-3s. Display returns 429 if busy.\n- E-ink retains image when powered off — no need to redraw on boot.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/DrawCommand" }
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "commands": { "type": "array", "items": { "$ref": "#/components/schemas/DrawCommand" } },
+                      "zone": { "type": "string", "description": "Target zone ID for partial update" },
+                      "refresh": { "type": "string", "enum": ["full", "partial", "none"], "default": "full", "description": "Display refresh mode. 'full': full EPD refresh after render (default). 'partial': partial refresh. 'none': draw to framebuffer only, no display refresh. Use 'none' for batched rendering — send multiple small requests with refresh:'none', then a final request with refresh:'full' to flush everything to the screen in one refresh. This lets you build complex scenes that exceed the single-request JSON memory limit (~10KB effective for point-heavy payloads)." },
+                      "validate": { "type": "boolean", "description": "Enable render validation with per-command bounding boxes, text overlap detection, and off-screen warnings", "default": false },
+                      "dryRun": { "type": "boolean", "description": "Dry-run mode: validate layout WITHOUT drawing to the display. Returns the same validation data as validate:true but does NOT render pixels, commit to the framebuffer, or trigger a display refresh. Use to iterate on layout before rendering. Implies validate:true. Response status will be 'dry_run'. Circuit breaker: after 3 consecutive dry-runs the 4th auto-promotes to a real render (dry_run_overridden:true). Response includes dry_runs_remaining.", "default": false }
+                    },
+                    "required": ["commands"]
+                  }
+                ]
+              },
+              "examples": {
+                "hello": {
+                  "summary": "Hello World - size 24 text centered on display",
+                  "value": [
+                    { "op": "clear", "color": "white" },
+                    { "op": "text", "x": 400, "y": 184, "text": "Hello AI", "font": "sans", "size": 24, "align": "center" }
+                  ]
+                },
+                "text_in_box": {
+                  "summary": "Text inside a filled rect (rect h >= yAdvance)",
+                  "value": [
+                    { "op": "clear", "color": "white" },
+                    { "op": "rect", "x": 50, "y": 100, "w": 700, "h": 56, "color": "black", "fill": true },
+                    { "op": "text", "x": 60, "y": 100, "text": "White text in black bar", "font": "sans", "size": 24, "bold": true, "color": "white" }
+                  ]
+                },
+                "stacked_text": {
+                  "summary": "Correctly spaced stacked text (each y += yAdvance)",
+                  "value": [
+                    { "op": "clear", "color": "white" },
+                    { "op": "text", "x": 20, "y": 20, "text": "Title (24pt, yAdv=56)", "font": "sans", "size": 24, "bold": true },
+                    { "op": "text", "x": 20, "y": 76, "text": "Subtitle (18pt, yAdv=42)", "font": "sans", "size": 18 },
+                    { "op": "text", "x": 20, "y": 118, "text": "Body text (12pt, yAdv=29)", "font": "sans", "size": 12 },
+                    { "op": "text", "x": 20, "y": 147, "text": "Caption (9pt, yAdv=22)", "font": "sans", "size": 9 }
+                  ]
+                },
+                "dashboard": {
+                  "summary": "Dashboard layout with proper spacing using font metrics",
+                  "value": [
+                    { "op": "clear", "color": "white" },
+                    { "op": "rect", "x": 0, "y": 0, "w": 800, "h": 42, "color": "black", "fill": true },
+                    { "op": "text", "x": 20, "y": 6, "text": "DASHBOARD", "font": "sans", "size": 12, "bold": true, "color": "white" },
+                    { "op": "text", "x": 500, "y": 12, "text": "March 5, 2026", "font": "sans", "size": 9, "color": "white", "align": "right", "maxWidth": 280 },
+                    { "op": "text", "x": 30, "y": 50, "text": "WEATHER", "font": "sans", "size": 9, "bold": true },
+                    { "op": "text", "x": 30, "y": 72, "text": "72F Sunny", "font": "sans", "size": 24, "bold": true },
+                    { "op": "text", "x": 30, "y": 130, "text": "High 78F / Low 65F | Humidity 45%", "font": "sans", "size": 9 },
+                    { "op": "line", "x0": 20, "y0": 158, "x1": 780, "y1": 158 },
+                    { "op": "text", "x": 30, "y": 164, "text": "SCHEDULE", "font": "sans", "size": 9, "bold": true },
+                    { "op": "text", "x": 30, "y": 186, "text": "9:00 AM  Team standup\n10:30 AM  Design review\n1:00 PM  Lunch with Alex\n3:00 PM  Sprint planning", "font": "sans", "size": 12, "maxWidth": 740, "lineHeight": 1.4 },
+                    { "op": "line", "x0": 20, "y0": 330, "x1": 780, "y1": 330 },
+                    { "op": "text", "x": 40, "y": 340, "text": "\"The best time to plant a tree was 20 years ago. The second best time is now.\"", "font": "sans", "size": 12, "maxWidth": 720 },
+                    { "op": "rect", "x": 0, "y": 458, "w": 800, "h": 22, "color": "black", "fill": true },
+                    { "op": "text", "x": 10, "y": 462, "text": "ai-canvas | 192.168.1.100", "font": "mono", "size": 9, "bold": true, "color": "white", "align": "center", "maxWidth": 780 }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Render result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "frame_id": { "type": "integer" },
+                    "render_time_ms": { "type": "integer" },
+                    "refresh_time_ms": { "type": "integer" },
+                    "commands_executed": { "type": "integer" },
+                    "warnings": { "type": "array", "items": { "type": "string" } },
+                    "validation": {
+                      "type": "object",
+                      "description": "Present when validate:true was requested. IMPORTANT: Always check text_overlaps and off_screen after each render -- if non-empty, fix your layout and re-render.",
+                      "properties": {
+                        "commands": {
+                          "type": "array",
+                          "description": "Per-command bounding boxes in render order",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "bbox": { "type": "array", "items": { "type": "integer" }, "description": "[x, y, w, h] bounding box of this command's output" },
+                              "off_screen": { "type": "boolean", "description": "True if any part extends beyond 800x480" },
+                              "lines": { "type": "integer", "description": "Number of text lines rendered (text commands only)" },
+                              "truncated": { "type": "boolean", "description": "True if text was truncated by maxHeight" }
+                            }
+                          }
+                        },
+                        "text_overlaps": {
+                          "type": "array",
+                          "description": "Pairs of command indices [i, j] where two text bounding boxes overlap. Non-empty means layout bug -- fix spacing and re-render.",
+                          "items": { "type": "array", "items": { "type": "integer" } }
+                        },
+                        "off_screen": {
+                          "type": "array",
+                          "description": "Command indices with content extending beyond the 800x480 display. Non-empty means content is clipped -- adjust positions and re-render.",
+                          "items": { "type": "integer" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": { "description": "Display busy" },
+          "413": { "description": "Payload too large (max 2MB)" }
+        }
+      },
+      "get": {
+        "summary": "Get current frame info",
+        "description": "Returns the command log for the currently displayed frame.",
+        "responses": {
+          "200": { "description": "Frame info with command log" }
+        }
+      }
+    },
+    "/canvas/screenshot": {
+      "get": {
+        "summary": "Get display screenshot",
+        "description": "Returns current display contents as a PBM image.",
+        "responses": {
+          "200": {
+            "description": "PBM image",
+            "content": { "image/x-portable-bitmap": {} }
+          }
+        }
+      }
+    },
+    "/canvas/clear": {
+      "post": {
+        "summary": "Clear display",
+        "description": "Clear the entire display to white or black.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "color": { "type": "string", "enum": ["white", "black"], "default": "white" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Success" }
+        }
+      }
+    },
+    "/zones": {
+      "post": {
+        "summary": "Define display zones",
+        "description": "Create named zones for partial display updates.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "x": { "type": "integer" },
+                    "y": { "type": "integer" },
+                    "w": { "type": "integer" },
+                    "h": { "type": "integer" }
+                  },
+                  "required": ["id", "x", "y", "w", "h"]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Zones created" }
+        }
+      },
+      "get": {
+        "summary": "List zones",
+        "responses": { "200": { "description": "Array of zones" } }
+      },
+      "delete": {
+        "summary": "Delete all zones",
+        "responses": { "200": { "description": "Zones cleared" } }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "description": "Returns uptime, free memory, WiFi RSSI, and display status.",
+        "responses": {
+          "200": {
+            "description": "Health info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "uptime_ms": { "type": "integer" },
+                    "free_heap": { "type": "integer" },
+                    "wifi_rssi": { "type": "integer" },
+                    "frame_id": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/device/name": {
+      "post": {
+        "summary": "Rename device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Name updated" } }
+      }
+    },
+    "/measure": {
+      "post": {
+        "summary": "Measure text dimensions",
+        "description": "Returns pixel-perfect dimensions for text without rendering. Supports single object or array for batch measurement. Use this to plan layouts precisely instead of estimating.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "text": { "type": "string", "description": "Text to measure" },
+                      "font": { "type": "string", "description": "'sans' or 'mono'. Default: 'sans'" },
+                      "size": { "type": "integer", "description": "Font size: 9, 12, 18, or 24. Default: 12" },
+                      "bold": { "type": "boolean", "description": "Bold text. Default: false" },
+                      "maxWidth": { "type": "integer", "description": "Max width for word wrap (pixels). 0 = no wrap." },
+                      "lineHeight": { "type": "number", "description": "Line height multiplier. Default: 1.2" }
+                    },
+                    "required": ["text"]
+                  },
+                  {
+                    "type": "array",
+                    "description": "Batch mode: array of measurement requests",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "text": { "type": "string" },
+                        "font": { "type": "string" },
+                        "size": { "type": "integer" },
+                        "bold": { "type": "boolean" },
+                        "maxWidth": { "type": "integer" },
+                        "lineHeight": { "type": "number" }
+                      },
+                      "required": ["text"]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Measurement result (object for single, array for batch)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "width": { "type": "integer", "description": "Actual pixel width of rendered text" },
+                    "height": { "type": "integer", "description": "Total pixel height of text block" },
+                    "lines": { "type": "integer", "description": "Number of lines (after word wrap)" },
+                    "truncated": { "type": "boolean", "description": "Whether text would be truncated at maxHeight" },
+                    "yAdvance": { "type": "integer", "description": "Font yAdvance value" },
+                    "lineHeight": { "type": "integer", "description": "Computed line height in pixels" }
+                  }
+                }
+              }
+            }
+          },
+          "429": { "description": "Display busy (measurement uses font engine)" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DrawCommand": {
+        "type": "object",
+        "required": ["op"],
+        "description": "A drawing command. Each operation uses different parameters - see the POST /canvas description for per-operation details.",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": ["clear", "pixel", "line", "rect", "circle", "ellipse", "arc", "polygon", "polyline", "text", "image", "gradient", "flood_fill", "clip", "unclip", "raw_bitmap", "qr"]
+          },
+          "x": { "type": "integer", "description": "X coordinate (horizontal, 0=left edge, 799=right edge)" },
+          "y": { "type": "integer", "description": "Y coordinate (vertical, 0=top edge, 479=bottom edge). For text: top of text block. First baseline renders at y + yAdvance." },
+          "x0": { "type": "integer", "description": "Line start X coordinate" },
+          "y0": { "type": "integer", "description": "Line start Y coordinate" },
+          "x1": { "type": "integer", "description": "Line end X coordinate" },
+          "y1": { "type": "integer", "description": "Line end Y coordinate" },
+          "w": { "type": "integer", "description": "Width" },
+          "h": { "type": "integer", "description": "Height" },
+          "r": { "type": "integer", "description": "Radius (circle, arc)" },
+          "rx": { "type": "integer", "description": "Horizontal radius (ellipse)" },
+          "ry": { "type": "integer", "description": "Vertical radius (ellipse)" },
+          "radius": { "type": "integer", "description": "Corner radius (rounded rect) or alias for r" },
+          "color": { "type": "string", "description": "'black' or 'white' (default: black)" },
+          "fill": { "type": "boolean", "description": "Fill shape (default: TRUE — shapes are solid by default). Set false for outline only. For rect: rounded corners (radius) only work when fill is true." },
+          "thickness": { "type": "integer", "description": "Line thickness in pixels (default: 1)" },
+          "stroke": { "type": "string", "description": "Rect stroke/border color" },
+          "strokeWidth": { "type": "integer", "description": "Rect stroke width (default: 1)" },
+          "text": { "type": "string", "description": "Text content. ASCII 0x20-0x7E only. Supports \\n for line breaks." },
+          "font": { "type": "string", "description": "'sans' or 'mono'. Default: 'sans'" },
+          "size": { "type": "integer", "description": "Font size: 9, 12, 18, or 24. Default: 12" },
+          "bold": { "type": "boolean", "description": "Bold text (default: false)" },
+          "align": { "type": "string", "enum": ["left", "center", "right"] },
+          "valign": { "type": "string", "enum": ["top", "middle", "bottom"], "description": "Vertical text alignment. REQUIRES maxHeight to be set — has no effect without it." },
+          "maxWidth": { "type": "integer", "description": "Max text width in pixels for word wrap. Also changes alignment behavior: with maxWidth, x is always the left edge of the text box and text aligns within that box width." },
+          "maxHeight": { "type": "integer", "description": "Max text height in pixels. Lines exceeding this are clipped, truncated, or shrunk per overflow setting." },
+          "overflow": { "type": "string", "enum": ["clip", "truncate", "shrink"], "description": "Text overflow when maxHeight exceeded. 'clip': hide overflow (default). 'truncate': last line gets '...'. 'shrink': try smaller fonts (loses bold)." },
+          "lineHeight": { "type": "number", "description": "Line height multiplier (default: 1.2)" },
+          "points": { "type": "array", "items": { "type": "object", "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } } }, "description": "Array of {x,y} points. Polygon: min 3, max 64. Polyline: min 2, max 64." },
+          "startAngle": { "type": "number", "description": "Arc start angle in degrees. 0=right(east), increases clockwise." },
+          "endAngle": { "type": "number", "description": "Arc end angle in degrees. 0=right(east), increases clockwise." },
+          "direction": { "type": "string", "enum": ["horizontal", "vertical"], "description": "Gradient direction" },
+          "from": { "type": "string", "description": "Gradient start color" },
+          "to": { "type": "string", "description": "Gradient end color" },
+          "data": { "type": "string", "description": "Base64-encoded data (PNG for image, packed bits for raw_bitmap)" },
+          "dither": { "type": "string", "enum": ["threshold", "ordered", "floyd_steinberg"] },
+          "ec": { "type": "string", "enum": ["L", "M", "Q", "H"], "description": "QR error correction level. L=7%, M=15%(default), Q=25%, H=30%." },
+          "meta": { "type": "object", "description": "Optional freeform metadata. Stored and returned in GET /canvas for multi-agent coordination. Example: {\"type\":\"weather\",\"source\":\"my-agent\",\"updated\":\"2026-03-06T07:00Z\"}", "additionalProperties": true }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firmware Update - UkieLab Display</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 500px; margin: 0 auto; }
+        header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        header .logo { font-size: 48px; margin-bottom: 8px; }
+        header h1 { font-size: 24px; color: #4fc3f7; margin-bottom: 4px; }
+        header .subtitle { color: #888; font-size: 14px; }
+        .card {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .card h2 {
+            color: #4fc3f7;
+            margin-bottom: 16px;
+            font-size: 16px;
+        }
+        .version-info {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 16px;
+            text-align: center;
+            font-size: 13px;
+            color: #888;
+        }
+        .version-info strong { color: #fff; }
+        .file-upload-wrapper {
+            position: relative;
+            margin-bottom: 16px;
+            height: 100px;
+            border: 2px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            background: rgba(0, 0, 0, 0.15);
+            transition: all 0.2s;
+        }
+        .file-upload-wrapper:hover {
+            border-color: #4fc3f7;
+            background: rgba(79, 195, 247, 0.05);
+        }
+        .file-upload-wrapper.drag-over {
+            border-color: #4fc3f7;
+            background: rgba(79, 195, 247, 0.1);
+        }
+        .upload-icon { font-size: 32px; margin-bottom: 6px; color: #ccc; }
+        .upload-text { color: #aaa; font-size: 13px; }
+        #file-input {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .selected-file {
+            margin-top: 8px;
+            font-weight: 600;
+            color: #4fc3f7;
+            font-size: 14px;
+            display: none;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #4fc3f7;
+            color: #000;
+        }
+        .btn-primary:hover:not(:disabled) { background: #29b6f6; }
+        .btn-primary:disabled {
+            background: #444;
+            color: #777;
+            cursor: not-allowed;
+        }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            margin-top: 10px;
+        }
+        .btn-secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
+        .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .progress-container {
+            margin-top: 16px;
+            display: none;
+        }
+        .progress-bar {
+            height: 24px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4fc3f7, #29b6f6);
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #000;
+            min-width: 40px;
+        }
+        .progress-text {
+            text-align: center;
+            margin-top: 8px;
+            font-size: 13px;
+            color: #aaa;
+        }
+        .status {
+            text-align: center;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+            font-size: 14px;
+        }
+        .status.success {
+            display: block;
+            background: rgba(0, 200, 83, 0.15);
+            border: 1px solid #00c853;
+            color: #95d5b2;
+        }
+        .status.error {
+            display: block;
+            background: rgba(255, 100, 100, 0.15);
+            border: 1px solid #ff6464;
+            color: #f48c8c;
+        }
+        .status.warning {
+            display: block;
+            background: rgba(255, 193, 7, 0.15);
+            border: 1px solid #ffc107;
+            color: #ffe082;
+        }
+        .update-available {
+            background: rgba(0, 200, 83, 0.08);
+            border: 1px solid #00c853;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .update-available h3 {
+            font-size: 15px;
+            margin-bottom: 12px;
+            color: #00c853;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 13px;
+        }
+        .info-row:last-of-type { border-bottom: none; }
+        .info-label { color: #888; }
+        .info-value { color: #fff; font-weight: 500; }
+        .update-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .update-buttons .btn {
+            flex: 1;
+            padding: 12px;
+            font-size: 14px;
+        }
+        footer {
+            text-align: center;
+            margin-top: 24px;
+            padding-bottom: 20px;
+            color: #555;
+            font-size: 13px;
+        }
+        footer a { color: #4fc3f7; text-decoration: none; margin: 0 10px; }
+        footer a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">🔄</div>
+            <h1>Firmware Update</h1>
+            <p class="subtitle">Keep your UkieLab Display up to date</p>
+        </header>
+
+        <div id="status" class="status"></div>
+
+        <div class="version-info">
+            <strong>Version:</strong> <span id="current-version">Loading...</span>
+            &nbsp;|&nbsp;
+            <strong>Environment:</strong> <span id="current-environment">Loading...</span>
+        </div>
+
+        <div class="card">
+            <h2>Update from GitHub</h2>
+
+            <div id="wifi-warning" class="status warning" style="display:none;">
+                GitHub updates require WiFi connection. Please connect to WiFi first.
+            </div>
+
+            <div id="update-available" class="update-available">
+                <h3 id="update-title">Update Available!</h3>
+                <div class="info-row">
+                    <span class="info-label">Latest Version</span>
+                    <span class="info-value" id="latest-version">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Release Name</span>
+                    <span class="info-value" id="release-name">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Published</span>
+                    <span class="info-value" id="published-at">-</span>
+                </div>
+                <div class="update-buttons">
+                    <button id="firmware-btn" class="btn btn-primary" onclick="installUpdate('firmware')">
+                        Update Firmware
+                    </button>
+                    <button id="spiffs-btn" class="btn btn-secondary" onclick="installUpdate('spiffs')" style="display:none;">
+                        Update Filesystem
+                    </button>
+                </div>
+            </div>
+
+            <div id="ota-progress" class="progress-container">
+                <div class="progress-bar">
+                    <div id="ota-progress-fill" class="progress-fill">0%</div>
+                </div>
+                <div id="ota-status-message" class="progress-text">Preparing update...</div>
+            </div>
+
+            <button id="check-update-btn" class="btn btn-primary" onclick="checkForUpdates()">
+                Check for Updates
+            </button>
+        </div>
+
+        <div class="card">
+            <h2>Manual Upload</h2>
+            <form id="uploadForm">
+                <div class="file-upload-wrapper" id="dropZone">
+                    <div class="upload-icon">📂</div>
+                    <div class="upload-text">Drag &amp; drop or tap to browse</div>
+                    <input type="file" id="file-input" name="update" accept=".bin" required>
+                    <div id="selectedFileName" class="selected-file"></div>
+                </div>
+
+                <div class="progress-container" id="uploadProgress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="uploadProgressFill">0%</div>
+                    </div>
+                    <div class="progress-text" id="uploadProgressText">Uploading...</div>
+                </div>
+
+                <button type="submit" id="uploadBtn" class="btn btn-secondary" disabled>
+                    Upload Firmware
+                </button>
+            </form>
+        </div>
+
+        <footer>
+            <a href="/">Settings</a> |
+            <a href="/wifi">WiFi</a> |
+            <a href="/update">Update</a>
+        </footer>
+    </div>
+
+    <script>
+        let updateProgressInterval = null;
+        let latestReleaseData = null;
+        let isWiFiConnected = false;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDeviceInfo();
+            initDragDrop();
+        });
+
+        // On page load: fetch version info only (no ?start, so no task spawned).
+        // If a check is already in progress from a previous action, show that state.
+        function loadDeviceInfo() {
+            fetch('/api/update/check')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('current-version').textContent = data.currentVersion || 'Unknown';
+                    document.getElementById('current-environment').textContent = data.currentEnvironment || 'Unknown';
+                    isWiFiConnected = !data.error || data.error.indexOf('WiFi') === -1;
+                    if (!isWiFiConnected) {
+                        document.getElementById('wifi-warning').style.display = 'block';
+                        document.getElementById('check-update-btn').disabled = true;
+                        return;
+                    }
+                    if (data.status === 'checking') {
+                        // Task already running from a previous page action — wait for it
+                        var btn = document.getElementById('check-update-btn');
+                        btn.disabled = true;
+                        btn.textContent = 'Checking...';
+                        setTimeout(function() { pollCheckResult(false); }, 1000);
+                    } else if (data.status === 'done') {
+                        handleCheckResult(data, false);
+                    }
+                })
+                .catch(() => {
+                    document.getElementById('current-version').textContent = 'Error';
+                    document.getElementById('current-environment').textContent = 'Error';
+                });
+        }
+
+        // User pressed "Check for Updates" — send ?start=1 (or ?force=true) to kick
+        // off the background task, then poll until status changes from "checking".
+        function checkForUpdates(force) {
+            var btn = document.getElementById('check-update-btn');
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            hideStatus();
+            document.getElementById('update-available').style.display = 'none';
+
+            var url = force ? '/api/update/check?force=true' : '/api/update/check?start=1';
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'checking') {
+                        setTimeout(function() { pollCheckResult(force); }, 1000);
+                    } else {
+                        handleCheckResult(data, force);
+                    }
+                })
+                .catch(() => {
+                    btn.disabled = false;
+                    btn.textContent = 'Check for Updates';
+                    showStatus('Failed to check for updates.', 'error');
+                });
+        }
+
+        // Poll /api/update/check (no params) until the background task finishes.
+        function pollCheckResult(force) {
+            fetch('/api/update/check')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'checking') {
+                        setTimeout(function() { pollCheckResult(force); }, 1000);
+                    } else {
+                        handleCheckResult(data, force);
+                    }
+                })
+                .catch(() => {
+                    var btn = document.getElementById('check-update-btn');
+                    btn.disabled = false;
+                    btn.textContent = 'Check for Updates';
+                    showStatus('Failed to check for updates.', 'error');
+                });
+        }
+
+        // Process a finished check result and update the UI.
+        function handleCheckResult(data, force) {
+            var btn = document.getElementById('check-update-btn');
+            btn.disabled = false;
+            btn.textContent = 'Check for Updates';
+            if (data.updateAvailable) {
+                latestReleaseData = data;
+                showUpdateAvailable(data, false);
+            } else if (data.error) {
+                showStatus('Error: ' + data.error, 'error');
+            } else if (data.latestVersion) {
+                // Up to date — still show the panel so the user can reinstall
+                latestReleaseData = data;
+                showStatus('Your device is up to date! Version ' + data.currentVersion, 'success');
+                showUpdateAvailable(data, true);
+            }
+        }
+
+        function showUpdateAvailable(data, isReinstall) {
+            document.getElementById('update-title').textContent =
+                isReinstall ? 'Reinstall Current Version' : 'Update Available!';
+            document.getElementById('latest-version').textContent = data.latestVersion;
+            document.getElementById('release-name').textContent = data.releaseName || data.latestVersion;
+            if (data.publishedAt) {
+                document.getElementById('published-at').textContent = new Date(data.publishedAt).toLocaleDateString();
+            } else {
+                document.getElementById('published-at').textContent = '-';
+            }
+            document.getElementById('firmware-btn').textContent =
+                isReinstall ? 'Reinstall Firmware' : 'Update Firmware';
+            var spiffsBtn = document.getElementById('spiffs-btn');
+            if (data.spiffsUrl) {
+                spiffsBtn.style.display = 'block';
+                spiffsBtn.textContent = isReinstall ? 'Reinstall Filesystem' : 'Update Filesystem';
+            } else {
+                spiffsBtn.style.display = 'none';
+            }
+            document.getElementById('update-available').style.display = 'block';
+        }
+
+        function installUpdate(type) {
+            if (!latestReleaseData) {
+                showStatus('No update data. Please check for updates first.', 'error');
+                return;
+            }
+            var isReinstall = document.getElementById('firmware-btn').textContent.indexOf('Reinstall') >= 0;
+            var msg = type === 'firmware'
+                ? (isReinstall ? 'Reinstall firmware? Device will restart.' : 'Update firmware? Device will restart.')
+                : (isReinstall ? 'Reinstall filesystem? Device will restart.' : 'Update filesystem? Device will restart.');
+            if (!confirm(msg)) return;
+
+            document.getElementById('update-available').style.display = 'none';
+            document.getElementById('ota-progress').style.display = 'block';
+            document.getElementById('ota-progress-fill').style.width = '0%';
+            document.getElementById('ota-progress-fill').textContent = '0%';
+            document.getElementById('ota-status-message').textContent = 'Starting update...';
+
+            var formData = new FormData();
+            formData.append('type', type);
+
+            fetch('/api/update/install', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'started') {
+                        updateProgressInterval = setInterval(pollUpdateProgress, 1000);
+                    } else {
+                        showStatus('Failed to start update: ' + (data.error || 'Unknown error'), 'error');
+                        document.getElementById('ota-progress').style.display = 'none';
+                    }
+                })
+                .catch(() => {
+                    showStatus('Failed to start update.', 'error');
+                    document.getElementById('ota-progress').style.display = 'none';
+                });
+        }
+
+        function pollUpdateProgress() {
+            fetch('/api/update/progress')
+                .then(r => r.json())
+                .then(data => {
+                    var p = data.progress || 0;
+                    document.getElementById('ota-progress-fill').style.width = p + '%';
+                    document.getElementById('ota-progress-fill').textContent = p + '%';
+                    document.getElementById('ota-status-message').textContent = data.message || 'Updating...';
+                    if ((data.status || 0) === 5) {
+                        clearInterval(updateProgressInterval);
+                        document.getElementById('ota-status-message').textContent = 'Complete! Restarting...';
+                        setTimeout(function() { window.location.reload(); }, 5000);
+                    } else if ((data.status || 0) >= 6) {
+                        clearInterval(updateProgressInterval);
+                        showStatus('Update failed: ' + (data.error || data.message), 'error');
+                        document.getElementById('ota-progress').style.display = 'none';
+                    }
+                })
+                .catch(function() {});
+        }
+
+        function initDragDrop() {
+            var dz = document.getElementById('dropZone');
+            var fi = document.getElementById('file-input');
+            ['dragenter','dragover','dragleave','drop'].forEach(function(e) {
+                dz.addEventListener(e, function(ev) { ev.preventDefault(); ev.stopPropagation(); }, false);
+            });
+            ['dragenter','dragover'].forEach(function(e) {
+                dz.addEventListener(e, function() { dz.classList.add('drag-over'); }, false);
+            });
+            ['dragleave','drop'].forEach(function(e) {
+                dz.addEventListener(e, function() { dz.classList.remove('drag-over'); }, false);
+            });
+            dz.addEventListener('drop', function(e) {
+                fi.files = e.dataTransfer.files;
+                handleFiles(e.dataTransfer.files);
+            }, false);
+            fi.addEventListener('change', function() { handleFiles(this.files); });
+        }
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                document.getElementById('selectedFileName').textContent = files[0].name;
+                document.getElementById('selectedFileName').style.display = 'block';
+                document.querySelector('.upload-icon').style.display = 'none';
+                document.querySelector('.upload-text').style.display = 'none';
+                document.getElementById('uploadBtn').disabled = false;
+            }
+        }
+
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            var file = document.getElementById('file-input').files[0];
+            if (!file) return;
+            var btn = document.getElementById('uploadBtn');
+            btn.disabled = true;
+            btn.textContent = 'Uploading...';
+            document.getElementById('uploadProgress').style.display = 'block';
+
+            var formData = new FormData();
+            formData.append('update', file);
+            var xhr = new XMLHttpRequest();
+            xhr.upload.addEventListener('progress', function(e) {
+                if (e.lengthComputable) {
+                    var pct = Math.round((e.loaded / e.total) * 100);
+                    document.getElementById('uploadProgressFill').style.width = pct + '%';
+                    document.getElementById('uploadProgressFill').textContent = pct + '%';
+                    document.getElementById('uploadProgressText').textContent = pct >= 100 ? 'Installing...' : 'Uploading...';
+                }
+            });
+            xhr.addEventListener('load', function() {
+                if (xhr.status === 200) {
+                    showStatus('Update successful! Restarting...', 'success');
+                    document.getElementById('uploadProgressText').textContent = 'Done!';
+                    setTimeout(function() { window.location.href = '/'; }, 5000);
+                } else {
+                    showStatus('Update failed: ' + xhr.responseText, 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Upload Firmware';
+                }
+            });
+            xhr.addEventListener('error', function() {
+                showStatus('Network error', 'error');
+                btn.disabled = false;
+                btn.textContent = 'Upload Firmware';
+            });
+            xhr.open('POST', '/update', true);
+            xhr.send(formData);
+        });
+
+        function showStatus(message, type) {
+            var el = document.getElementById('status');
+            el.textContent = message;
+            el.className = 'status ' + type;
+        }
+
+        function hideStatus() {
+            var el = document.getElementById('status');
+            el.className = 'status';
+            el.textContent = '';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "githubUser": "BatsIhor",
+  "githubRepo": "UkieLab-Canvas",
+  "connection": {
+    "ssid": "",
+    "password": ""
+  },
+  "canvas": {
+    "deviceName": "aink"
+  }
+}

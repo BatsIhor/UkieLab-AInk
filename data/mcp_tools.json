@@ -1,0 +1,120 @@
+{
+  "tools": [
+    {
+      "name": "display_render",
+      "description": "Render drawing commands on the AI Canvas e-ink display. Display is 800x480 pixels, black and white only. Coordinates: (0,0) is top-left, x horizontal (0-799), y vertical (0-479). Commands execute in order; display refreshes after all complete (~2-3s). Returns 429 if busy; retry after 3s.\n\nRENDERING MODEL:\nCommands render sequentially — later commands overwrite earlier ones (no transparency). Each pixel is black or white. Without a 'clear' command, new commands draw on top of existing content. Include {op:'clear'} first to start fresh.\n\nCHARACTER SET:\nASCII 0x20-0x7E only (space through ~). Do NOT use unicode, degree symbols (use 'F' not '°F'), em dashes (use '--'), curly quotes, or emoji.\n\nCOLORS: 'black' or 'white'. Default: black for drawing, white for clear.\n\nOPERATIONS:\n- clear: {color} - default white\n- pixel: {x, y, color}\n- line: {x0, y0, x1, y1, color, thickness(default 1)} - also accepts x/y as aliases for x0/y0\n- rect: {x, y, w, h, color, fill, radius, stroke, strokeWidth} - fill defaults TRUE (solid). Set fill:false for outline. radius (rounded corners) ONLY works with fill:true. stroke/strokeWidth add a border on top.\n- circle: {x(center), y(center), r, color, fill(default true)}\n- ellipse: {x(center), y(center), rx, ry, color, fill(default true)}\n- arc: {x(center), y(center), r, startAngle, endAngle, color} - angles: 0=east, clockwise. 1px outline only.\n- polygon: {points:[{x,y},...], color, fill(default true)} - min 3, max 64 points. Outline always drawn.\n- polyline: {points:[{x,y},...], color} - min 2, max 64 points. No thickness.\n- text: {x, y, text, font, size, bold, color, align, valign, maxWidth, maxHeight, overflow, lineHeight} - see TEXT LAYOUT below\n- image: {x, y, w, h, data(base64 PNG), dither} - dither: 'threshold'|'ordered'(default)|'floyd_steinberg'. w/h = target display size.\n- gradient: {x, y, w, h, direction('horizontal'|'vertical'), from, to} - dithered. Defaults: horizontal, black->white.\n- flood_fill: {x, y, color} - WARNING: queue limit 4096 pixels, large fills incomplete. Use rect for large solid areas.\n- clip: {x, y, w, h} - one clip at a time, new replaces old\n- unclip: {} - remove clip\n- raw_bitmap: {x, y, w, h, data(base64)} - 1-bit packed, MSB=leftmost, rows byte-aligned, 1=white 0=black\n- qr: {x, y, size, data, color, ec} - QR code. size=square px (modules scale to fit). data=string to encode. ec: 'L'|'M'(default)|'Q'|'H'. Includes 2-module quiet zone.\n\nMETADATA:\nAny command can include 'meta' (freeform object). Stored and returned by GET /canvas for multi-agent coordination. Example: {\"op\":\"text\",\"x\":30,\"y\":72,\"text\":\"72F\",\"meta\":{\"type\":\"weather\"}}. Frame-level meta: {\"commands\":[...],\"meta\":{\"agent\":\"my-agent\"}}.\n\nTEXT MEASUREMENT: Use POST /measure (or text_measure tool) to get pixel-perfect text dimensions before rendering.\n\n=== TEXT LAYOUT (CRITICAL - read before placing text) ===\n\nDefaults when omitted: font='sans', size=12, bold=false, align='left', lineHeight=1.2.\n\nThe y parameter is the TOP of the text block, but the first baseline renders at y + yAdvance. Visible glyph pixels start at approximately y + 0.6 * yAdvance.\n\nFont metrics:\n  sans  9pt: yAdvance=22, line height=26px\n  sans 12pt: yAdvance=29, line height=34px\n  sans 18pt: yAdvance=42, line height=50px\n  sans 24pt: yAdvance=56, line height=67px\n  mono  9pt: yAdvance=18, line height=21px\n\nText supports \\n for manual line breaks.\n\nSPACING RULES (prevent overlaps):\n1. Total height of N lines = N * floor(yAdvance * lineHeight). Next element goes at y + this value or below.\n2. Text inside filled rect: rect h >= yAdvance, set text y = rect_y (bottom-aligned). For centering: text y = rect_y - (yAdvance - rect_h)/3. Negative y is safe (clipped). Example: 60px bar at y=0 with size 24: set text y=-10.\n3. Align shapes (circles, rects as bullets) with text: shape_center_y = text_y + 0.8 * yAdvance. Example: text y=100 size 12 -- bullet circle cy=123.\n4. Same baseline for mixed sizes: y_a + yAdvance_a == y_b + yAdvance_b.\n5. Estimate wrapped lines: chars_per_line ~ maxWidth / (yAdvance * 0.45).\n\nAlignment: Without maxWidth, x is anchor (left/center/right per align). With maxWidth, x is LEFT edge of text box, text aligns within.\n\nvalign: REQUIRES maxHeight to work. Without maxHeight, valign has no effect.\n\noverflow: 'clip'(default) hides overflow. 'truncate' adds '...' to last line. 'shrink' tries smaller fonts 24->18->12->9 (bold is lost).\n\nCOMMON MISTAKES (read this before rendering):\n1. ALWAYS compute text block height before placing the next element: block_h = num_lines * floor(yAdvance * lineHeight). Next element y >= prev_y + block_h.\n2. ALWAYS estimate wrapped line count when using maxWidth: num_lines = ceil(char_count / floor(maxWidth / (yAdvance * 0.45))). Account for manual \\n adding extra lines.\n3. NEVER set maxHeight smaller than the text needs — it silently clips lines. Required: maxHeight >= num_lines * floor(yAdvance * lineHeight).\n4. NEVER eyeball y positions — calculate every y from the previous element's y + block_h.\n5. Keep status bar text short — long strings get clipped at display edge (800px).\n\nBATCHED RENDERING:\\nFor complex scenes (many commands or polyline/polygon points), split into multiple smaller requests with refresh:'none', then send a final request with refresh:'full'. Each batch draws to the framebuffer without refreshing the display. The final batch triggers one screen refresh. Always include 'clear' only in the FIRST batch.\\n\\nLIMITS: JSON payload max ~32KB (effective ~10KB for point-heavy payloads due to JSON parser memory). Polygon/polyline max 64 points. Flood fill max 4096px queue.\n\nVALIDATION MODE:\nPass \"validate\":true in the request body (or ?validate query param) to get per-command bounding boxes and layout verification in the response. The response will include a \"validation\" object with:\n- commands: array of {bbox:[x,y,w,h], off_screen, lines, truncated} for each command\n- text_overlaps: pairs of command indices where two text bounding boxes overlap (almost always a layout bug)\n- off_screen: list of command indices with content extending beyond the 800x480 display\nUse validation to verify renders without downloading screenshots. Check text_overlaps to catch spacing errors, off_screen to find clipped content, and bbox positions to verify layout.\n\nDRY-RUN MODE (RECOMMENDED WORKFLOW):\nPass \"dryRun\":true to validate layout WITHOUT touching the display. No pixels are drawn, no framebuffer is modified, no display refresh happens. The response includes the same validation data as validate:true. Use this workflow:\n1. Send commands with dryRun:true\n2. Check text_overlaps and off_screen in the response\n3. If issues found, adjust coordinates and repeat step 1\n4. When validation passes (both arrays empty), send the same commands WITHOUT dryRun to render\nThis avoids multiple slow e-ink refreshes (~3s each) while iterating on layout.\nCircuit breaker: after 3 consecutive dry-runs, the 4th dryRun request auto-promotes to a real render (status:'ok', dry_run_overridden:true). The response includes dry_runs_remaining to track this. Any real render resets the counter.\n\nExample - dashboard with header bar, content, status bar:\n[\n  {\"op\":\"clear\",\"color\":\"white\"},\n  {\"op\":\"rect\",\"x\":0,\"y\":0,\"w\":800,\"h\":42,\"color\":\"black\",\"fill\":true},\n  {\"op\":\"text\",\"x\":20,\"y\":6,\"text\":\"DASHBOARD\",\"font\":\"sans\",\"size\":12,\"bold\":true,\"color\":\"white\"},\n  {\"op\":\"text\",\"x\":30,\"y\":50,\"text\":\"Section Title\",\"font\":\"sans\",\"size\":9,\"bold\":true},\n  {\"op\":\"text\",\"x\":30,\"y\":72,\"text\":\"Large Text\",\"font\":\"sans\",\"size\":24,\"bold\":true},\n  {\"op\":\"text\",\"x\":30,\"y\":130,\"text\":\"Detail line\",\"font\":\"sans\",\"size\":9},\n  {\"op\":\"line\",\"x0\":20,\"y0\":158,\"x1\":780,\"y1\":158},\n  {\"op\":\"text\",\"x\":30,\"y\":164,\"text\":\"SECTION 2\",\"font\":\"sans\",\"size\":9,\"bold\":true},\n  {\"op\":\"text\",\"x\":30,\"y\":186,\"text\":\"Line 1\\nLine 2\\nLine 3\",\"font\":\"sans\",\"size\":12,\"maxWidth\":740},\n  {\"op\":\"rect\",\"x\":0,\"y\":458,\"w\":800,\"h\":22,\"color\":\"black\",\"fill\":true},\n  {\"op\":\"text\",\"x\":10,\"y\":462,\"text\":\"status bar text\",\"font\":\"mono\",\"size\":9,\"bold\":true,\"color\":\"white\",\"align\":\"center\",\"maxWidth\":780}\n]",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "commands": {
+            "type": "array",
+            "description": "Array of drawing commands to execute in order",
+            "items": {
+              "type": "object",
+              "required": ["op"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": ["clear", "pixel", "line", "rect", "circle", "ellipse", "arc", "polygon", "polyline", "text", "image", "gradient", "flood_fill", "clip", "unclip", "raw_bitmap", "qr"],
+                  "description": "Drawing operation type"
+                },
+                "x": { "type": "integer", "description": "X coordinate (horizontal, 0=left, max 799)" },
+                "y": { "type": "integer", "description": "Y coordinate (vertical, 0=top, max 479). For text: top of text block; first baseline at y + yAdvance" },
+                "x0": { "type": "integer", "description": "Line start X" },
+                "y0": { "type": "integer", "description": "Line start Y" },
+                "x1": { "type": "integer", "description": "Line end X" },
+                "y1": { "type": "integer", "description": "Line end Y" },
+                "w": { "type": "integer", "description": "Width (rect, image, clip, gradient, raw_bitmap)" },
+                "h": { "type": "integer", "description": "Height (rect, image, clip, gradient, raw_bitmap)" },
+                "r": { "type": "integer", "description": "Radius (circle, arc)" },
+                "rx": { "type": "integer", "description": "Horizontal radius (ellipse)" },
+                "ry": { "type": "integer", "description": "Vertical radius (ellipse)" },
+                "radius": { "type": "integer", "description": "Corner radius for rounded rect, or alias for r" },
+                "color": { "type": "string", "description": "'black' or 'white' (default: black)" },
+                "fill": { "type": "boolean", "description": "Fill shape (default: TRUE — shapes are solid). Set false for outline. Rect rounded corners (radius) only work when fill is true." },
+                "thickness": { "type": "integer", "description": "Line thickness in pixels (default: 1)" },
+                "stroke": { "type": "string", "description": "Stroke color for rect border ('black'|'white')" },
+                "strokeWidth": { "type": "integer", "description": "Stroke width for rect border (default: 1)" },
+                "text": { "type": "string", "description": "Text content. ASCII 0x20-0x7E only. Supports \\n for line breaks." },
+                "font": { "type": "string", "description": "Font family: 'sans' or 'mono'. Default: 'sans'" },
+                "size": { "type": "integer", "description": "Font size: 9, 12, 18, or 24. Default: 12" },
+                "bold": { "type": "boolean", "description": "Bold text (default: false)" },
+                "align": { "type": "string", "enum": ["left", "center", "right"], "description": "Horizontal text alignment" },
+                "valign": { "type": "string", "enum": ["top", "middle", "bottom"], "description": "Vertical text alignment. REQUIRES maxHeight to be set — no effect without it." },
+                "maxWidth": { "type": "integer", "description": "Max text width for word wrap (pixels). With maxWidth, x is always the LEFT edge of the text box." },
+                "maxHeight": { "type": "integer", "description": "Max text height (pixels). Lines exceeding this are clipped/truncated/shrunk per overflow." },
+                "overflow": { "type": "string", "enum": ["clip", "truncate", "shrink"], "description": "Text overflow when maxHeight exceeded. 'clip'(default): hide. 'truncate': adds '...'. 'shrink': tries smaller fonts (loses bold)." },
+                "lineHeight": { "type": "number", "description": "Line height multiplier (default: 1.2)" },
+                "points": { "type": "array", "items": { "type": "object", "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } } }, "description": "Array of {x,y} points. Polygon: min 3, max 64. Polyline: min 2, max 64." },
+                "startAngle": { "type": "number", "description": "Arc start angle in degrees. 0=east, increases clockwise." },
+                "endAngle": { "type": "number", "description": "Arc end angle in degrees. 0=east, increases clockwise." },
+                "direction": { "type": "string", "enum": ["horizontal", "vertical"], "description": "Gradient direction" },
+                "from": { "type": "string", "description": "Gradient start color" },
+                "to": { "type": "string", "description": "Gradient end color" },
+                "data": { "type": "string", "description": "Base64-encoded data (image: PNG, raw_bitmap: 1-bit packed)" },
+                "dither": { "type": "string", "enum": ["threshold", "ordered", "floyd_steinberg"], "description": "Dithering mode for image" },
+                "ec": { "type": "string", "enum": ["L", "M", "Q", "H"], "description": "QR error correction: L=7%, M=15%(default), Q=25%, H=30%" },
+                "meta": { "type": "object", "description": "Optional freeform metadata for multi-agent coordination. Stored and returned by GET /canvas.", "additionalProperties": true }
+              }
+            }
+          },
+          "zone": {
+            "type": "string",
+            "description": "Optional zone ID for partial update"
+          },
+          "refresh": {
+            "type": "string",
+            "enum": ["full", "partial", "none"],
+            "default": "full",
+            "description": "Display refresh mode. 'none': draw to framebuffer without refreshing the display. Use for batched rendering: send multiple small requests with refresh:'none', then a final request with refresh:'full' to flush to screen. This bypasses the single-request JSON memory limit."
+          },
+          "validate": {
+            "type": "boolean",
+            "description": "Enable render validation. Response will include per-command bounding boxes, text-text overlap detection, and off-screen content warnings. Use this instead of downloading screenshots to verify layout correctness.",
+            "default": false
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Dry-run mode: validate layout WITHOUT drawing to the display. Returns the same validation data as validate:true (bounding boxes, text overlaps, off-screen warnings) but does NOT render pixels, commit to the framebuffer, or trigger a display refresh. Use this to iterate on layout until text_overlaps and off_screen are empty, then send the final version without dryRun to actually render. Status will be 'dry_run' instead of 'ok'. Implies validate:true. Circuit breaker: after 3 consecutive dry-runs the device auto-renders the 4th request (dry_run_overridden:true in response). Response includes dry_runs_remaining.",
+            "default": false
+          }
+        },
+        "required": ["commands"]
+      }
+    },
+    {
+      "name": "display_info",
+      "description": "Get AI Canvas display capabilities, dimensions (800x480, B/W), available fonts, and device status.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "text_measure",
+      "description": "Measure text dimensions without rendering. Returns pixel-perfect width, height, line count, and font metrics. Use this to plan layouts precisely instead of estimating. Supports batch mode (array of requests) to measure multiple strings in one call.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "measurements": {
+            "type": "array",
+            "description": "Array of text measurement requests. Each returns {width, height, lines, truncated, yAdvance, lineHeight}.",
+            "items": {
+              "type": "object",
+              "required": ["text"],
+              "properties": {
+                "text": { "type": "string", "description": "Text to measure" },
+                "font": { "type": "string", "description": "'sans' or 'mono'. Default: 'sans'" },
+                "size": { "type": "integer", "description": "Font size: 9, 12, 18, or 24. Default: 12" },
+                "bold": { "type": "boolean", "description": "Bold. Default: false" },
+                "maxWidth": { "type": "integer", "description": "Max width for word wrap (px). 0=no wrap." },
+                "lineHeight": { "type": "number", "description": "Line height multiplier. Default: 1.2" }
+              }
+            }
+          }
+        },
+        "required": ["measurements"]
+      }
+    }
+  ]
+}

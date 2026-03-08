@@ -1,0 +1,88 @@
+# Release Pipeline — Build firmware and create a GitHub Release
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v0.1.945)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as pre-release?"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write  # Required for creating releases and uploading assets
+
+    steps:
+      - name: Validate version format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must match format vX.Y.Z (e.g. v0.1.945)"
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Set version in version file
+        run: |
+          # Strip leading 'v' and write to version file
+          echo "${{ inputs.version }}" | sed 's/^v//' > version
+
+      - name: Create version marker
+        # Prevent the version increment script from bumping beyond the set version
+        run: touch .version_no_increment
+
+      - name: Build firmware
+        run: pio run -e aicanvas_esp32_75bw
+
+      - name: Build SPIFFS filesystem image
+        run: pio run -e aicanvas_esp32_75bw -t buildfs
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          cp .pio/build/aicanvas_esp32_75bw/firmware.bin \
+             release-assets/firmware_aicanvas_esp32_75bw.bin
+          cp .pio/build/aicanvas_esp32_75bw/spiffs.bin \
+             release-assets/spiffs_aicanvas_esp32_75bw.bin
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: Release ${{ inputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ inputs.prerelease }}
+          files: |
+            release-assets/firmware_aicanvas_esp32_75bw.bin
+            release-assets/spiffs_aicanvas_esp32_75bw.bin
