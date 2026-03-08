@@ -1,5 +1,43 @@
 # AInk — AI-First E-Ink Canvas
 
+> *Read the full story: [Introducing the AI-First Display](https://ukielab.com/introducing-the-ai-first-display/)*
+
+## A Device Designed to Be Used by AI
+
+Traditional displays follow the same model — the human controls the screen. You open apps, navigate menus, search for information. Even "AI-powered" devices still require humans to operate the display, with AI constrained inside predefined containers.
+
+**AInk is different.** It's a completely new category of device — an **AI-First Display** — designed from the ground up for AI agents to operate and communicate through.
+
+On an AI-First Display:
+
+- The **AI agent decides** what information is shown
+- The **AI decides** when it should appear
+- The **interface is generated dynamically**
+- The **user simply glances** at the device
+
+Instead of `AI → computer → OS → application → display`, the interaction becomes simply `AI → display`. No operating system, no graphical frameworks, no application layer — just direct communication between AI and the display.
+
+### Self-Describing Hardware
+
+When an AI agent discovers the device, it can immediately read its capabilities and start using it — no drivers, no cables, no manual configuration. The device explains itself:
+
+```
+Hello AI.
+I am a display device.
+Resolution: 800x480
+Color: grayscale
+Refresh time: 1.2 seconds
+Send content using simple layout JSON.
+```
+
+### Why E-Ink
+
+E-ink displays behave like digital paper — they consume very little power, retain their image indefinitely, and only update when content changes. This makes them ideal for ambient information surfaces that quietly show what matters. The display becomes a living information board rather than an interactive computer.
+
+---
+
+## What It Does
+
 An ESP32-based persistent HTTP server that turns a 7.5" black-and-white e-paper display (800x480) into a physical canvas for AI agents. Agents discover the device on the local network via mDNS, read its capabilities, and send JSON drawing commands to render anything — dashboards, schedules, weather, artwork, notifications.
 
 **No cloud. No app. No human UI.** The API is the entire product. The human is simply the viewer.
@@ -162,6 +200,30 @@ pio device monitor
 For commercial licensing inquiries, visit [ukielab.com](https://ukielab.com).
 
 This project uses third-party open-source components under their own licenses. See [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES) for details.
+
+---
+
+## Use Cases
+
+AInk is built for **glanceable intelligence** — context-aware information surfaced by AI without any human interaction.
+
+**Morning:** Your AI agent combines weather, traffic, and your calendar — *"Rain at 9:30. Leave by 8:15 to arrive on time."*
+
+**Afternoon:** *"Package arriving in 12 minutes. Front door camera ready."*
+
+**Evening:** *"Cold tomorrow. Kids should wear jacket and gloves."*
+
+No apps. No searching. No menus. Just the right information at the right moment.
+
+Since AInk devices are WiFi-enabled, they don't need to be in the same room as your AI. Put one in the office, one in the garage, one in the living room. Your agent discovers them all and displays relevant information on each — schedules, homework, reminders, or whatever context is available.
+
+---
+
+## Vision
+
+AI-First Displays are just the beginning. In the future: AI home terminals, AI kitchen displays, AI office assistants, AI information panels. In all cases, the device is not a computer — it is a **communication surface for AI systems**. Something that AI can easily discover, understand, and use.
+
+> *The interface of the AI is not another app, not a webpage, not a widget. It is the ability for AI to surface the right information at the right moment, presented in a way that requires no searching, no navigation, and no effort from the user.*
 
 ---
 
