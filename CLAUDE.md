@@ -85,7 +85,7 @@ Preserved: `/wifi`, `/wifiSave`, `/wifiList`, `/connectionStatus`, `/update` (OT
 ### Settings (`data/settings.json`)
 
 - `canvas.deviceName` — mDNS hostname (default "aink")
-- `githubUser/githubRepo` — OTA update source (defaults to BatsIhor/UkieLab-Canvas)
+- `githubUser/githubRepo` — OTA update source (defaults to BatsIhor/UkieLab-AInk)
 - `connection.ssid/password` — WiFi credentials
 
 ### mDNS Discovery

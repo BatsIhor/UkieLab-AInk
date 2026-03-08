@@ -75,8 +75,8 @@ You need [PlatformIO](https://platformio.org/) (VS Code extension or CLI).
 
 ```bash
 # Clone the repository
-git clone https://github.com/BatsIhor/UkieLab-Canvas.git
-cd UkieLab-Canvas
+git clone https://github.com/BatsIhor/UkieLab-AInk.git
+cd UkieLab-AInk
 
 # Build and upload firmware
 pio run -e aicanvas_esp32_75bw -t upload
@@ -163,7 +163,7 @@ Settings.cpp               SPIFFS-persisted settings with atomic save
 Settings are stored in SPIFFS (`data/settings.json`):
 
 - `canvas.deviceName` — mDNS hostname (default: `aink`)
-- `githubUser` / `githubRepo` — OTA update source (default: `BatsIhor/UkieLab-Canvas`)
+- `githubUser` / `githubRepo` — OTA update source (default: `BatsIhor/UkieLab-AInk`)
 - `connection.ssid` / `password` — WiFi credentials (set via captive portal)
 
 ### Factory Reset

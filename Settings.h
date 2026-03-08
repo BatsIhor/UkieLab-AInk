@@ -12,7 +12,7 @@ public:
   struct GeneralSettings {
     // GitHub OTA settings (defaults to public repo, no auth needed)
     String githubUser = "BatsIhor";
-    String githubRepo = "UkieLab-Canvas";
+    String githubRepo = "UkieLab-AInk";
   };
 
   struct ConnectionSettings {
