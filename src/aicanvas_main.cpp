@@ -8,6 +8,8 @@
 #include <ESPmDNS.h>
 #include <Update.h>
 #include <esp_wifi.h>
+#include <Preferences.h>
+#include <time.h>
 
 #include "Settings.h"
 #include "EPD.h"
@@ -55,6 +57,15 @@ bool wifiConnected = false;
 bool shouldRedirectToWifi = false;
 unsigned long setupModeStartTime = 0;
 const unsigned long SETUP_INACTIVITY_TIMEOUT = 5 * 60 * 1000;
+
+// NVS namespace for auto-update settings (survives OTA firmware updates)
+static const char* NVS_NAMESPACE  = "aink_cfg";
+static const char* NVS_KEY_AUTO   = "auto_upd";
+static const char* NVS_KEY_LAST   = "last_day";
+
+// Auto-update state (loaded from NVS at boot)
+bool autoUpdateEnabled = false;
+static unsigned long lastAutoUpdatePoll = 0;  // millis throttle (every 60s)
 
 // OTA check result (written by task, read by HTTP handler)
 struct OTACheckResult {
@@ -434,6 +445,47 @@ void showSleepingSetupScreen() {
     if (framebuffer.isValid()) framebuffer.swapAfterFullRefresh();
 }
 
+// ============ NVS Auto-Update Helpers ============
+
+bool nvsGetAutoUpdateEnabled() {
+    Preferences prefs;
+    prefs.begin(NVS_NAMESPACE, true); // read-only
+    bool val = prefs.getBool(NVS_KEY_AUTO, false);
+    prefs.end();
+    return val;
+}
+
+void nvsSetAutoUpdateEnabled(bool enabled) {
+    Preferences prefs;
+    prefs.begin(NVS_NAMESPACE, false);
+    prefs.putBool(NVS_KEY_AUTO, enabled);
+    prefs.end();
+    autoUpdateEnabled = enabled;
+    Serial.printf("Auto-update %s (saved to NVS)\n", enabled ? "enabled" : "disabled");
+}
+
+// Returns "days since Unix epoch" for the given time_t, or 0 if unavailable
+static uint32_t getCurrentDay() {
+    time_t now = time(nullptr);
+    if (now < 1000000) return 0; // NTP not synced yet
+    return (uint32_t)(now / 86400UL);
+}
+
+uint32_t nvsGetLastAutoUpdateDay() {
+    Preferences prefs;
+    prefs.begin(NVS_NAMESPACE, true);
+    uint32_t val = prefs.getUInt(NVS_KEY_LAST, 0);
+    prefs.end();
+    return val;
+}
+
+void nvsSetLastAutoUpdateDay(uint32_t day) {
+    Preferences prefs;
+    prefs.begin(NVS_NAMESPACE, false);
+    prefs.putUInt(NVS_KEY_LAST, day);
+    prefs.end();
+}
+
 // ============ OTA Tasks ============
 
 struct OTACheckTaskParams { bool force; };
@@ -460,6 +512,44 @@ void otaCheckTask(void* param) {
         otaCheckResult.error = "";
     }
     otaCheckResult.checked = true;
+
+    otaTaskRunning = false;
+    vTaskDelete(NULL);
+}
+
+// Auto-update task: check and install if newer version is available
+void otaAutoUpdateTask(void* param) {
+    Serial.println("Auto-update: checking for new firmware...");
+    bool hasUpdate = otaManager.checkForUpdates(false);
+
+    GitHubRelease rel = otaManager.getLatestRelease();
+    otaCheckResult.hasUpdate     = hasUpdate;
+    otaCheckResult.latestVersion = rel.tagName;
+    otaCheckResult.releaseName   = rel.name;
+    otaCheckResult.publishedAt   = rel.publishedAt;
+    otaCheckResult.firmwareUrl   = rel.firmwareUrl;
+    otaCheckResult.spiffsUrl     = rel.spiffsUrl;
+    otaCheckResult.error         = (!hasUpdate && otaManager.getStatus() != OTAUpdateStatus::UPDATE_AVAILABLE)
+                                   ? otaManager.getErrorMessage() : "";
+    otaCheckResult.checked       = true;
+
+    // Record that we ran today regardless of outcome
+    uint32_t today = getCurrentDay();
+    if (today > 0) nvsSetLastAutoUpdateDay(today);
+
+    if (hasUpdate) {
+        Serial.printf("Auto-update: newer version %s available, installing...\n", rel.tagName.c_str());
+        bool success = otaManager.installFirmwareFromGitHub();
+        if (success) {
+            Serial.println("Auto-update: firmware installed, restarting...");
+            delay(1000);
+            ESP.restart();
+        } else {
+            Serial.printf("Auto-update: install failed: %s\n", otaManager.getErrorMessage().c_str());
+        }
+    } else {
+        Serial.println("Auto-update: already up to date.");
+    }
 
     otaTaskRunning = false;
     vTaskDelete(NULL);
@@ -681,6 +771,36 @@ void setupWebServer() {
         req->send(200, "application/json", r);
     });
 
+    // Auto-update schedule setting (persisted in NVS, survives firmware updates)
+    server.on("/api/update/auto", HTTP_GET, [](AsyncWebServerRequest* req) {
+        DynamicJsonDocument doc(128);
+        doc["enabled"] = autoUpdateEnabled;
+        String r; serializeJson(doc, r);
+        req->send(200, "application/json", r);
+    });
+
+    server.on("/api/update/auto", HTTP_POST, [](AsyncWebServerRequest* req) {},
+        nullptr,
+        [](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
+            static String body;
+            if (index == 0) body = "";
+            body += String((char*)data).substring(0, len);
+            if (index + len == total) {
+                DynamicJsonDocument doc(128);
+                if (deserializeJson(doc, body) == DeserializationError::Ok && doc.containsKey("enabled")) {
+                    bool enabled = doc["enabled"].as<bool>();
+                    nvsSetAutoUpdateEnabled(enabled);
+                    DynamicJsonDocument resp(128);
+                    resp["success"] = true;
+                    resp["enabled"] = autoUpdateEnabled;
+                    String r; serializeJson(resp, r);
+                    req->send(200, "application/json", r);
+                } else {
+                    req->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+                }
+            }
+        });
+
     // Manual firmware upload
     server.on("/update", HTTP_POST, [](AsyncWebServerRequest* req) {
         req->send(200, "text/plain", Update.hasError() ? "FAIL" : "OK");
@@ -763,6 +883,9 @@ void setup() {
     // Initialize settings
     Settings::Initialize();
     mySettings->readSettings();
+
+    // Load auto-update preference from NVS (persists across OTA updates)
+    autoUpdateEnabled = nvsGetAutoUpdateEnabled();
 
     // Set OTA repo from settings
     if (!mySettings->generalSettings.githubUser.isEmpty() &&
@@ -897,6 +1020,10 @@ void setup() {
         wifiConnected = true;
         Serial.println("\nWiFi connected: " + WiFi.localIP().toString());
 
+        // Sync time via NTP (needed for scheduled auto-updates at 2 AM)
+        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+        Serial.println("NTP time sync initiated");
+
         // Setup mDNS
         setupMDNS();
 
@@ -921,6 +1048,27 @@ void setup() {
 
 void loop() {
     mySettings->loop();
+
+    // Check scheduled auto-update (throttled to once per minute)
+    if (wifiConnected && autoUpdateEnabled && !otaTaskRunning) {
+        unsigned long now = millis();
+        if (now - lastAutoUpdatePoll >= 60000UL) {
+            lastAutoUpdatePoll = now;
+
+            struct tm timeinfo;
+            if (getLocalTime(&timeinfo, 0)) {
+                // Trigger at 2:00–2:59 AM UTC, once per day
+                if (timeinfo.tm_hour == 2) {
+                    uint32_t today = getCurrentDay();
+                    if (today > 0 && today != nvsGetLastAutoUpdateDay()) {
+                        Serial.println("Auto-update: 2 AM window — starting update check");
+                        otaTaskRunning = true;
+                        xTaskCreate(otaAutoUpdateTask, "ota_auto", 16384, nullptr, 1, NULL);
+                    }
+                }
+            }
+        }
+    }
 
     // Light sleep between requests to save power
     // WiFi stays connected, HTTP server stays active
