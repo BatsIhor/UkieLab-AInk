@@ -98,25 +98,58 @@ void EPD::_writeData(uint8_t data)
 
 void EPD::_waitBusy(const char* msg, uint32_t timeout_ms)
 {
-    uint32_t start = millis();
-    while (digitalRead(_busy) == LOW) {
-        if (millis() - start > timeout_ms) {
-            Serial.printf("EPD timeout: %s (%lums)\n", msg, timeout_ms);
+#ifdef EPD_PANEL_SSD1677
+    // SSD1677: BUSY is active HIGH (busy while HIGH, ready when LOW)
+    static constexpr int BUSY_LEVEL = HIGH;
+#else
+    // GD7965/UC8179: BUSY is active LOW (busy while LOW, ready when HIGH)
+    static constexpr int BUSY_LEVEL = LOW;
+#endif
+
+    delay(1); // Give controller time to assert BUSY after command
+
+    unsigned long start = micros();
+
+    // Phase 1: Wait for BUSY to assert (controller may need a few ms)
+    bool busy_detected = false;
+    for (int i = 0; i < 10; i++) {
+        if (digitalRead(_busy) == BUSY_LEVEL) {
+            busy_detected = true;
             break;
         }
         delay(1);
-        yield();  // Feed watchdog, let other FreeRTOS tasks run
     }
+
+    if (busy_detected) {
+        // Phase 2: Wait for BUSY to de-assert (operation complete)
+        while (digitalRead(_busy) == BUSY_LEVEL) {
+            if (micros() - start > (unsigned long)timeout_ms * 1000UL) {
+                Serial.printf("EPD timeout: %s (%lums)\n", msg, timeout_ms);
+                break;
+            }
+            delay(1);
+            yield();
+        }
+    } else {
+        // BUSY never asserted — fall back to time-based wait
+        Serial.printf("EPD _waitBusy(%s): BUSY not asserted, delay %lums\n", msg, timeout_ms);
+        delay(timeout_ms);
+    }
+
+    unsigned long elapsed = micros() - start;
+    Serial.printf("EPD _waitBusy(%s): %luus (detected=%d)\n", msg, elapsed, busy_detected);
 }
 
 void EPD::_reset(uint16_t rst_dur_ms)
 {
     if (_rst >= 0) {
+        // Match reference: HIGH → LOW → HIGH with fixed delays (no BUSY check)
+        digitalWrite(_rst, HIGH);
+        delay(10);
         digitalWrite(_rst, LOW);
         delay(rst_dur_ms);
         digitalWrite(_rst, HIGH);
-        delay(200);
-        _waitBusy("reset-settle", 2000);
+        delay(rst_dur_ms > 10 ? rst_dur_ms : 10);
     }
 }
 
@@ -128,6 +161,34 @@ void EPD::_initDisplay(uint16_t rst_dur)
 {
     if (_hibernating) _reset(rst_dur);
 
+#ifdef EPD_PANEL_SSD1677
+    // ---- SSD1677 (10.2" GDEM102T91) init sequence ----
+    delay(15);
+    _writeCommand(0x12); // SWRESET
+    delay(15);
+
+    _writeCommand(0x0C); // Soft start setting
+    _writeData(0xAE);
+    _writeData(0xC7);
+    _writeData(0xC3);
+    _writeData(0xC0);
+    _writeData(0xFF);
+
+    _writeCommand(0x01); // Set MUX as 639
+    _writeData((EPD_HEIGHT - 1) & 0xFF);
+    _writeData(((EPD_HEIGHT - 1) >> 8) & 0xFF);
+    _writeData(0x00);
+
+    _writeCommand(0x3C); // VBD
+    _writeData(0x01);    // LUT1, for white
+
+    _writeCommand(0x18); // Temperature sensor
+    _writeData(0x80);
+
+    _ssd1677_setPartialRamArea(0, 0, EPD_WIDTH, EPD_HEIGHT);
+#else
+    // ---- GD7965 / UC8179 (7.5") init sequence ----
+
     // Power Setting
     _writeCommand(0x01);
     _writeData(0x07);
@@ -136,11 +197,11 @@ void EPD::_initDisplay(uint16_t rst_dur)
     _writeData(0x3f);
 
 #ifdef EPD_BW_ONLY
-    // Panel Setting: KW (B/W) mode — matches working GD7965/GDEW075T7 driver
+    // Panel Setting: KW (B/W) mode
     _writeCommand(0x00);
     _writeData(0x1f);
 
-    // Resolution Setting: 800 x 480
+    // Resolution Setting
     _writeCommand(0x61);
     _writeData(EPD_WIDTH  >> 8);
     _writeData(EPD_WIDTH  & 0xFF);
@@ -180,7 +241,9 @@ void EPD::_initDisplay(uint16_t rst_dur)
 
     _writeCommand(0x60);
     _writeData(0x22);
-#endif
+#endif // EPD_BW_ONLY
+
+#endif // EPD_PANEL_SSD1677
 }
 
 void EPD::init(uint32_t baud, bool initial, uint16_t rst_dur, bool pulldown)
@@ -207,9 +270,14 @@ void EPD::init(uint32_t baud, bool initial, uint16_t rst_dur, bool pulldown)
     // Init display registers
     _initDisplay(rst_dur > 0 ? rst_dur : 10);
 
-    // Power On
+#ifdef EPD_PANEL_SSD1677
+    // SSD1677 uses display update sequence for power control
+    _ssd1677_powerOn();
+#else
+    // GD7965/UC8179 Power On
     _writeCommand(0x04);
     _waitBusy("PowerOn", 2000);
+#endif
     _power_is_on = true;
     _hibernating = false;
     Serial.printf("EPD: init complete (BUSY=%d)\n", digitalRead(_busy));
@@ -266,6 +334,54 @@ void EPD::_sendBuffersToDisplay()
         _refresh_pending = false;
     }
 
+#ifdef EPD_PANEL_SSD1677
+    // ---- SSD1677 (10.2") full refresh ----
+    Serial.printf("EPD SSD1677: _sendBuffers start (power=%d, BUSY=%d)\n", _power_is_on, digitalRead(_busy));
+
+    // Hardware reset to ensure clean state
+    _power_is_on = false;  // Reset clears controller state
+    _reset(10);
+    Serial.printf("EPD SSD1677: after reset (BUSY=%d)\n", digitalRead(_busy));
+
+    _initDisplay(10);
+    Serial.printf("EPD SSD1677: after initDisplay (BUSY=%d)\n", digitalRead(_busy));
+
+    // Count non-white bytes for debug
+    uint32_t nonWhite = 0;
+    for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
+        if (_black[i] != 0xFF) nonWhite++;
+    }
+    Serial.printf("EPD SSD1677: buffer has %u non-white bytes of %u\n", nonWhite, EPD_BUF_SIZE);
+
+    // SSD1677: send image to both previous (0x26) and current (0x24) buffers
+    for (uint8_t cmd : {0x26, 0x24}) {
+        _ssd1677_setPartialRamArea(0, 0, EPD_WIDTH, EPD_HEIGHT);
+        _writeCommand(cmd);
+        SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+        digitalWrite(_dc, HIGH);
+        digitalWrite(_cs, LOW);
+        for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
+            SPI.transfer(_black[i]);
+            if ((i & 0xFFF) == 0) yield();
+        }
+        digitalWrite(_cs, HIGH);
+        SPI.endTransaction();
+        delay(1);
+        yield();
+        Serial.printf("EPD SSD1677: sent buffer to cmd 0x%02X (BUSY=%d)\n", cmd, digitalRead(_busy));
+    }
+
+    Serial.printf("EPD SSD1677: powering on (power=%d, BUSY=%d)\n", _power_is_on, digitalRead(_busy));
+    _ssd1677_powerOn();
+    Serial.printf("EPD SSD1677: power on done (power=%d, BUSY=%d)\n", _power_is_on, digitalRead(_busy));
+
+    Serial.println("EPD SSD1677: triggering full refresh...");
+    _ssd1677_updateFull();
+    _refresh_pending = false;
+    Serial.printf("EPD SSD1677: refresh complete (power=%d, BUSY=%d)\n", _power_is_on, digitalRead(_busy));
+
+#else
+    // ---- GD7965 / UC8179 (7.5") full refresh ----
     if (_power_is_on) {
         Serial.println("EPD: power off before refresh");
         _writeCommand(0x02);
@@ -289,17 +405,15 @@ void EPD::_sendBuffersToDisplay()
     Serial.printf("EPD: buffer has %u non-white bytes of %u\n", nonWhite, EPD_BUF_SIZE);
 
 #ifdef EPD_BW_ONLY
-    // B/W panel (GD7965/GDEW075T7): image data goes to cmd 0x13 (current buffer)
-    // Previous buffer 0x10 gets all-white for clean refresh
+    // B/W panel: previous buffer (0x10) = all white, current buffer (0x13) = image data
 
-    // Send previous buffer (0x10) = all white
     _writeCommand(0x10);
     SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
     digitalWrite(_dc, HIGH);
     digitalWrite(_cs, LOW);
     for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
         SPI.transfer(0xFF);
-        if ((i & 0xFFF) == 0) yield();  // Every 4KB, let other tasks run
+        if ((i & 0xFFF) == 0) yield();
     }
     digitalWrite(_cs, HIGH);
     SPI.endTransaction();
@@ -307,7 +421,6 @@ void EPD::_sendBuffersToDisplay()
 
     Serial.println("EPD: sending image data to cmd 0x13");
 
-    // Send current buffer (0x13) = our image data
     _writeCommand(0x13);
     SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
     digitalWrite(_dc, HIGH);
@@ -342,15 +455,14 @@ void EPD::_sendBuffersToDisplay()
     SPI.endTransaction();
 #endif
 
-    // Trigger display refresh (non-blocking — returns immediately)
-    // The panel needs ~4.2s to complete the B/W refresh.
-    // The NEXT call to _sendBuffersToDisplay will wait for it at the top.
+    // Trigger display refresh (non-blocking)
     Serial.println("EPD: triggering refresh (0x12)");
     _writeCommand(0x12);
     _refresh_pending = true;
-    delay(200);  // Give panel time to assert BUSY before anyone checks
+    delay(200);
     yield();
     Serial.printf("EPD: refresh triggered (BUSY=%d)\n", digitalRead(_busy));
+#endif // EPD_PANEL_SSD1677
 }
 
 void EPD::_sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h)
@@ -361,6 +473,7 @@ void EPD::_sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h)
     int16_t x1 = x & ~7;          // round down to multiple of 8
     int16_t x2 = ((x + w + 7) & ~7) - 1;  // round up to multiple of 8, minus 1
     int16_t wBytes = (x2 - x1 + 1) / 8;
+    int16_t w1 = wBytes * 8;
 
     // Clamp
     if (x1 < 0) x1 = 0;
@@ -374,6 +487,35 @@ void EPD::_sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h)
         _refresh_pending = false;
     }
 
+#ifdef EPD_PANEL_SSD1677
+    // ---- SSD1677 partial update ----
+    _reset(10);
+    _initDisplay(10);
+
+    // Send partial region to both previous (0x26) and current (0x24) buffers
+    for (uint8_t cmd : {0x26, 0x24}) {
+        _ssd1677_setPartialRamArea(x1, y, w1, h);
+        _writeCommand(cmd);
+        SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+        digitalWrite(_dc, HIGH);
+        digitalWrite(_cs, LOW);
+        for (int16_t row = y; row < y + h; row++) {
+            uint32_t rowOffset = (uint32_t)row * (EPD_WIDTH / 8) + (x1 / 8);
+            for (int16_t col = 0; col < wBytes; col++) {
+                SPI.transfer(_black[rowOffset + col]);
+            }
+        }
+        digitalWrite(_cs, HIGH);
+        SPI.endTransaction();
+    }
+
+    _ssd1677_setPartialRamArea(x1, y, w1, h);
+    _ssd1677_powerOn();
+    _ssd1677_updatePartial();
+    _refresh_pending = false;
+
+#else
+    // ---- GD7965 / UC8179 partial update ----
     if (_power_is_on) {
         _writeCommand(0x02);
         _waitBusy("PowerOff-pre", 5000);
@@ -442,6 +584,7 @@ void EPD::_sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h)
 
     // Exit partial mode
     _writeCommand(0x92);
+#endif // EPD_PANEL_SSD1677
 }
 
 // ============================================================
@@ -500,9 +643,13 @@ void EPD::powerOff()
         _waitBusy("idle-before-poweroff", 25000);
         _refresh_pending = false;
     }
+#ifdef EPD_PANEL_SSD1677
+    _ssd1677_powerOff();
+#else
     _writeCommand(0x02);
     delay(10);
     _waitBusy("PowerOff", 1000);
+#endif
     _power_is_on = false;
 }
 
@@ -888,3 +1035,77 @@ void EPD::getTextBounds(const String& str, int16_t x, int16_t y,
         *h  = (uint16_t)(maxY - minY + 1);
     }
 }
+
+// ============================================================
+// 8. SSD1677 panel helpers (10.2" GDEM102T91)
+// ============================================================
+
+#ifdef EPD_PANEL_SSD1677
+
+void EPD::_ssd1677_setPartialRamArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+    _writeCommand(0x11); // set ram entry mode
+    _writeData(0x03);    // x increase, y increase
+
+    _writeCommand(0x44); // set RAM x address start/end
+    _writeData(x & 0xFF);
+    _writeData(x >> 8);
+    _writeData((x + w - 1) & 0xFF);
+    _writeData((x + w - 1) >> 8);
+
+    _writeCommand(0x45); // set RAM y address start/end
+    _writeData(y & 0xFF);
+    _writeData(y >> 8);
+    _writeData((y + h - 1) & 0xFF);
+    _writeData((y + h - 1) >> 8);
+
+    _writeCommand(0x4e); // set RAM x address counter
+    _writeData(x & 0xFF);
+    _writeData(x >> 8);
+
+    _writeCommand(0x4f); // set RAM y address counter
+    _writeData(y & 0xFF);
+    _writeData(y >> 8);
+}
+
+void EPD::_ssd1677_powerOn()
+{
+    if (!_power_is_on) {
+        _writeCommand(0x22);
+        _writeData(0xc0);
+        _writeCommand(0x20);
+        _waitBusy("SSD1677_PowerOn", 1000);
+    }
+    _power_is_on = true;
+}
+
+void EPD::_ssd1677_powerOff()
+{
+    if (_power_is_on) {
+        _writeCommand(0x22);
+        _writeData(0x83);
+        _writeCommand(0x20);
+        _waitBusy("SSD1677_PowerOff", 200);
+    }
+    _power_is_on = false;
+}
+
+void EPD::_ssd1677_updateFull()
+{
+    _writeCommand(0x22);
+    _writeData(0xf7);
+    _writeCommand(0x20);
+    _waitBusy("SSD1677_UpdateFull", 6000);
+    _power_is_on = false;
+}
+
+void EPD::_ssd1677_updatePartial()
+{
+    _writeCommand(0x22);
+    _writeData(0xfc);
+    _writeCommand(0x20);
+    _waitBusy("SSD1677_UpdatePartial", 1000);
+    _power_is_on = true;
+}
+
+#endif // EPD_PANEL_SSD1677

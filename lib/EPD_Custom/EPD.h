@@ -9,14 +9,14 @@
 #define GxEPD_WHITE  0xFFFF
 #define GxEPD_RED    0xF800
 
-// Display geometry
+// Display geometry — override via build flags for different panels
 #ifndef EPD_WIDTH
 #define EPD_WIDTH    800
 #endif
 #ifndef EPD_HEIGHT
 #define EPD_HEIGHT   480
 #endif
-#define EPD_BUF_SIZE ((EPD_WIDTH * EPD_HEIGHT) / 8)  // 48000 bytes per plane
+#define EPD_BUF_SIZE ((EPD_WIDTH * EPD_HEIGHT) / 8)
 
 // Refresh modes
 enum EPDRefreshMode {
@@ -26,8 +26,10 @@ enum EPDRefreshMode {
 };
 
 // ============================================================
-// EPD -- custom full-buffer driver for 7.5" e-paper
-// Supports GD7965 (GDEW075Z08) and UC8179 (GDEY075Z08) panels.
+// EPD -- custom full-buffer driver for B/W e-paper displays
+// Supported panels:
+//   - GD7965 / UC8179  (7.5" 800x480)  — default
+//   - SSD1677           (10.2" 960x640) — define EPD_PANEL_SSD1677
 // Under EPD_BW_ONLY, allocates only the black plane buffer.
 // ============================================================
 class EPD {
@@ -137,6 +139,15 @@ private:
     void _initDisplay(uint16_t rst_dur);
     void _sendBuffersToDisplay();
     void _sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h);
+
+#ifdef EPD_PANEL_SSD1677
+    // SSD1677-specific helpers (10.2" panel)
+    void _ssd1677_setPartialRamArea(uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+    void _ssd1677_powerOn();
+    void _ssd1677_powerOff();
+    void _ssd1677_updateFull();
+    void _ssd1677_updatePartial();
+#endif
 
     // -- GFX helpers
     void _drawCircleHelper(int16_t x0, int16_t y0, int16_t r,

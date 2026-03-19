@@ -23,18 +23,21 @@ bool FramebufferManager::init(uint8_t* externalBackBuffer)
     _back = externalBackBuffer;
 
     if (!_front) {
-        _front = (uint8_t*)malloc(BUFFER_SIZE);
-        if (!_front) {
-            Serial.printf("FramebufferManager: front buffer alloc FAILED! Need %d bytes, largest: %d\n",
-                          BUFFER_SIZE, ESP.getMaxAllocHeap());
-            _back = nullptr;
-            return false;
+        // Skip front buffer on large displays (10.2" = 76800 bytes) to preserve
+        // heap for WiFi, AsyncTCP, HTTP server, and JSON parsing (~140KB needed).
+        bool skipFrontBuffer = (BUFFER_SIZE > 48000);
+        if (!skipFrontBuffer) {
+            _front = (uint8_t*)malloc(BUFFER_SIZE);
+        }
+        if (_front) {
+            memset(_front, 0xFF, BUFFER_SIZE); // white
+            Serial.printf("FramebufferManager: double-buffered (%u bytes)\n", BUFFER_SIZE);
+        } else {
+            Serial.printf("FramebufferManager: single-buffer mode (%u bytes saved)\n", BUFFER_SIZE);
         }
     }
 
-    memset(_front, 0xFF, BUFFER_SIZE); // white
-    // Back buffer (EPD) should already be initialized to white
-    return true;
+    return true;  // Valid even without front buffer
 }
 
 void FramebufferManager::setPixel(int16_t x, int16_t y, bool white)
@@ -70,8 +73,20 @@ void FramebufferManager::clear(bool white)
 FramebufferManager::DirtyRect FramebufferManager::commit()
 {
     DirtyRect rect = {0, 0, 0, 0, true};
-    if (!_front || !_back) return rect;
+    if (!_back) return rect;
 
+    // Single-buffer mode: no front buffer to compare against.
+    // Return full-screen dirty rect so caller always does a full refresh.
+    if (!_front) {
+        rect.x = 0;
+        rect.y = 0;
+        rect.w = EPD_WIDTH;
+        rect.h = EPD_HEIGHT;
+        rect.empty = false;
+        return rect;
+    }
+
+    // Double-buffer mode: compare front/back to find dirty region
     int16_t bytesPerRow = EPD_WIDTH / 8;
     int16_t minRow = EPD_HEIGHT, maxRow = -1;
     int16_t minCol = bytesPerRow, maxCol = -1;
@@ -109,4 +124,5 @@ void FramebufferManager::swapAfterFullRefresh()
     if (_front && _back) {
         memcpy(_front, _back, BUFFER_SIZE);
     }
+    // Single-buffer mode: no-op
 }

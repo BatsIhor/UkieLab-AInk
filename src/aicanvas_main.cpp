@@ -135,7 +135,7 @@ void showStartupScreen(const String& ipAddress) {
     const GFXfont* captionBoldFont = FontRegistry::findClosest("sans", 9, true);
 
     // Header bar
-    epd->fillRect(0, 0, 800, 46, GxEPD_BLACK);
+    epd->fillRect(0, 0, EPD_WIDTH, 46, GxEPD_BLACK);
     if (titleFont) {
         epd->setFont(titleFont);
         epd->setTextColor(GxEPD_WHITE);
@@ -145,6 +145,7 @@ void showStartupScreen(const String& ipAddress) {
 
     // ---- Left side: instructions ----
     int leftX = 30;
+    int midX = EPD_WIDTH / 2;
 
     if (bigFont) {
         epd->setFont(bigFont);
@@ -181,7 +182,7 @@ void showStartupScreen(const String& ipAddress) {
     }
 
     // Divider line
-    epd->drawLine(leftX, 320, 370, 320, GxEPD_BLACK);
+    epd->drawLine(leftX, 320, midX - 30, 320, GxEPD_BLACK);
 
     if (captionFont) {
         epd->setFont(captionFont);
@@ -195,11 +196,10 @@ void showStartupScreen(const String& ipAddress) {
     }
 
     // Vertical divider
-    epd->drawLine(400, 60, 400, 440, GxEPD_BLACK);
+    epd->drawLine(midX, 60, midX, EPD_HEIGHT - 40, GxEPD_BLACK);
 
     // ---- Right side: QR code ----
-    // Right column: x=400..800, center=600
-    int rightCx = 600;
+    int rightCx = midX + (EPD_WIDTH - midX) / 2;
     int qrSize = 180;
 
     if (bigFont) {
@@ -242,12 +242,13 @@ void showStartupScreen(const String& ipAddress) {
     }
 
     // Bottom bar
-    epd->fillRect(0, 458, 800, 22, GxEPD_BLACK);
+    int footerY = EPD_HEIGHT - 22;
+    epd->fillRect(0, footerY, EPD_WIDTH, 22, GxEPD_BLACK);
     if (captionFont) {
         epd->setFont(captionFont);
         epd->setTextColor(GxEPD_WHITE);
         String ver = VERSION;
-        epd->setCursor(20, 472);
+        epd->setCursor(20, footerY + 14);
         epd->print("AInk v" + ver + "  |  ukielab.com");
     }
 
@@ -329,7 +330,7 @@ void showSetupScreen() {
     const GFXfont* captionBoldFont = FontRegistry::findClosest("sans", 9, true);
 
     // Header bar
-    epd->fillRect(0, 0, 800, 46, GxEPD_BLACK);
+    epd->fillRect(0, 0, EPD_WIDTH, 46, GxEPD_BLACK);
     if (titleFont) {
         epd->setFont(titleFont);
         epd->setTextColor(GxEPD_WHITE);
@@ -339,6 +340,7 @@ void showSetupScreen() {
 
     // ---- STEP 1 (left half) ----
     int step1X = 30;
+    int setupMidX = EPD_WIDTH / 2;
 
     if (bigFont) {
         epd->setFont(bigFont);
@@ -374,10 +376,10 @@ void showSetupScreen() {
     }
 
     // Vertical divider
-    epd->drawLine(400, 60, 400, 440, GxEPD_BLACK);
+    epd->drawLine(setupMidX, 60, setupMidX, EPD_HEIGHT - 40, GxEPD_BLACK);
 
     // ---- STEP 2 (right half) ----
-    int step2X = 430;
+    int step2X = setupMidX + 30;
 
     if (bigFont) {
         epd->setFont(bigFont);
@@ -387,12 +389,12 @@ void showSetupScreen() {
     }
 
     // URL QR code
-    drawQrToEpd("http://192.168.4.1", 460, 120, 180);
+    drawQrToEpd("http://192.168.4.1", step2X + 30, 120, 180);
 
     if (captionBoldFont) {
         epd->setFont(captionBoldFont);
         epd->setTextColor(GxEPD_BLACK);
-        epd->setCursor(470, 310);
+        epd->setCursor(step2X + 40, 310);
         epd->print("Scan to open setup");
     }
 
@@ -413,12 +415,13 @@ void showSetupScreen() {
     }
 
     // Bottom bar
-    epd->fillRect(0, 458, 800, 22, GxEPD_BLACK);
+    int setupFooterY = EPD_HEIGHT - 22;
+    epd->fillRect(0, setupFooterY, EPD_WIDTH, 22, GxEPD_BLACK);
     if (captionFont) {
         epd->setFont(captionFont);
         epd->setTextColor(GxEPD_WHITE);
         String ver = VERSION;
-        epd->setCursor(20, 472);
+        epd->setCursor(20, setupFooterY + 14);
         epd->print("AInk v" + ver + "  |  ukielab.com");
     }
 
@@ -850,7 +853,11 @@ void setupMDNS() {
     if (MDNS.begin(hostname.c_str())) {
         // Primary service: AI screen protocol
         MDNS.addService("_aiscreen", "_tcp", 80);
+#ifdef EPD_PANEL_SSD1677
+        MDNS.addServiceTxt("_aiscreen", "_tcp", "model", "ai-display-10.2");
+#else
         MDNS.addServiceTxt("_aiscreen", "_tcp", "model", "ai-display-7.5");
+#endif
         String ver = VERSION;
         MDNS.addServiceTxt("_aiscreen", "_tcp", "version", ver.c_str());
         MDNS.addServiceTxt("_aiscreen", "_tcp", "width", String(EPD_WIDTH).c_str());
@@ -911,24 +918,17 @@ void setup() {
     // Initialize display
     initDisplay();
 
-    // Initialize framebuffer (shares EPD's buffer as back buffer to save 48KB)
+    // Initialize framebuffer (shares EPD's buffer as back buffer)
+    // On 10.2" displays, the front buffer may not fit in memory — that's OK,
+    // FramebufferManager falls back to single-buffer mode (always full refresh).
     if (!framebuffer.init(epd->getBlackBuffer())) {
-        Serial.println("FATAL: Framebuffer allocation failed!");
-        // Show error on display directly
-        if (epd) {
-            epd->fillScreen(GxEPD_WHITE);
-            const GFXfont* font = FontRegistry::findClosest("sans", 18, true);
-            if (font) {
-                epd->setFont(font);
-                epd->setCursor(200, 240);
-                epd->print("ERROR: Out of memory");
-            }
-            epd->display(false);
-        }
+        Serial.println("FATAL: Framebuffer init failed (no back buffer)!");
         while (true) delay(1000);
     }
 
-    Serial.printf("Framebuffer initialized. Free heap: %d\n", ESP.getFreeHeap());
+    Serial.printf("Framebuffer initialized (%s). Free heap: %d\n",
+                  framebuffer.isDoubleBuffered() ? "double-buffered" : "single-buffer",
+                  ESP.getFreeHeap());
 
     // Setup API context
     apiCtx.epd = epd;
@@ -948,11 +948,11 @@ void setup() {
     xTaskCreatePinnedToCore(
         ApiHandlers::displayRefreshTask,
         "epd_refresh",
-        4096,        // Stack size
+        8192,        // Stack size (SSD1677 needs more for reset+init+76KB SPI transfer)
         &apiCtx,     // Parameter
         1,           // Priority
         &apiCtx.displayTask,
-        0            // Core 0
+        1            // Core 1 (same core as SPI init)
     );
 
     // If not configured, start AP mode for setup
@@ -960,6 +960,12 @@ void setup() {
         Serial.println("Starting setup mode");
 
         showSetupScreen();
+
+        // Free display buffers to reclaim memory for WiFi scanning.
+        // The e-ink panel retains its image, so we don't need the buffers
+        // until normal operation begins after WiFi is configured.
+        epd->freeBuffers();
+        Serial.printf("Freed EPD buffers for setup mode. Free heap: %d\n", ESP.getFreeHeap());
 
         // Start AP+STA (STA needed for WiFi scanning)
         WiFi.mode(WIFI_AP_STA);
@@ -987,6 +993,7 @@ void setup() {
             if (!otaTaskRunning && millis() - setupModeStartTime > SETUP_INACTIVITY_TIMEOUT) {
                 Serial.println("Setup inactivity timeout");
                 dnsServer.stop();
+                epd->allocateBuffers();  // Re-allocate briefly for sleep screen
                 showSleepingSetupScreen();
                 // Wait for refresh to complete, then light sleep
                 epd->waitReady();
@@ -999,6 +1006,13 @@ void setup() {
         }
 
         dnsServer.stop();
+
+        // Re-allocate display buffers after setup mode
+        if (!epd->buffersValid()) {
+            epd->allocateBuffers();
+            framebuffer.init(epd->getBlackBuffer());
+            Serial.printf("Re-allocated display buffers. Free heap: %d\n", ESP.getFreeHeap());
+        }
     }
 
     // Connect to WiFi

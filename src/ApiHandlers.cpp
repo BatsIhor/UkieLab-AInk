@@ -109,7 +109,11 @@ void ApiHandlers::handleGetDevice(AsyncWebServerRequest* req, Context& ctx)
     DynamicJsonDocument doc(2048);
 
     doc["name"] = mySettings->canvasSettings.deviceName;
+#ifdef EPD_PANEL_SSD1677
+    doc["model"] = "aink-10.2";
+#else
     doc["model"] = "aink-7.5";
+#endif
     doc["version"] = VERSION;
 
     JsonObject display = doc.createNestedObject("display");
@@ -280,15 +284,25 @@ void ApiHandlers::handlePostCanvas(AsyncWebServerRequest* req, uint8_t* data, si
         ctx.lastFrameId = frameId;
         ctx.lastRenderTimeMs = renderResult.renderTimeMs;
 
-        // Signal display task to refresh (non-blocking — doesn't touch EPD here)
+        // Refresh the display
         // refresh:"none" skips refresh — use for batched rendering (send multiple
         // small requests, then a final one with refresh:"full" to flush to screen)
         bool skipRefresh = (refreshStr == "none");
         if (!dirty.empty && !skipRefresh) {
+#ifdef EPD_PANEL_SSD1677
+            // SSD1677: refresh synchronously (same path as startup screen)
+            ctx.refreshBusy = true;
+            unsigned long rstart = millis();
+            ctx.epd->display(false);
+            ctx.lastRefreshTimeMs = millis() - rstart;
+            ctx.refreshBusy = false;
+#else
+            // GD7965: signal background task for non-blocking refresh
             ctx.refreshRequested = true;
             if (ctx.displayTask) {
                 xTaskNotifyGive(ctx.displayTask);
             }
+#endif
         }
     }
 
@@ -453,11 +467,17 @@ void ApiHandlers::handlePostClear(AsyncWebServerRequest* req, uint8_t* data, siz
     ctx.log->addCommand("clear");
     ctx.lastFrameId = ctx.log->endFrame();
 
-    // Signal display task to refresh
+    // Refresh display
+#ifdef EPD_PANEL_SSD1677
+    ctx.refreshBusy = true;
+    ctx.epd->display(false);
+    ctx.refreshBusy = false;
+#else
     ctx.refreshRequested = true;
     if (ctx.displayTask) {
         xTaskNotifyGive(ctx.displayTask);
     }
+#endif
 
     xSemaphoreGive(ctx.renderMutex);
 
