@@ -115,7 +115,7 @@ E-paper retains its image indefinitely. Before entering setup sleep, display mus
 
 # AI Canvas E-Ink Display Integration
 
-An AI Canvas e-ink display ("aink") is available on the local network at `192.168.87.43`.
+An AI Canvas e-ink display ("aink") is available on the local network at some IP address.
 Use it to show progress during multi-step implementation tasks.
 
 ## When to Use the Display
@@ -136,7 +136,7 @@ Use the helper pattern below. Save it as a utility and import it when needed:
 ```python
 import json, urllib.request, time
 
-DISPLAY_IP = "192.168.87.43"
+DISPLAY_IP = "[check with a user]"
 _last_render = 0
 
 def render(commands):
@@ -203,6 +203,6 @@ def show_plan(title, steps):
 - JSON payload max ~32KB
 - E-ink retains image when powered off — no need to redraw on boot
 
-IMPORTANT: When executing multi-step implementation plans, ALWAYS 
-render progress on the AI Canvas display. Show the checklist at plan 
+IMPORTANT: When executing multi-step implementation plans, ALWAYS
+render progress on the AI Canvas display. Show the checklist at plan
 start and update it as each step completes.

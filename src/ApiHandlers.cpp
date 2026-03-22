@@ -199,7 +199,7 @@ void ApiHandlers::handlePostCanvas(AsyncWebServerRequest* req, uint8_t* data, si
     // (polyline/polygon point arrays: each {"x":N,"y":N} object = ~48 bytes internal)
     size_t docSize = bodyLen * 4;
     if (docSize < 2048) docSize = 2048;
-    if (docSize > 65536) docSize = 65536;
+    if (docSize > 131072) docSize = 131072;  // 128KB max — ESP32 has ~290KB headroom
 
     DynamicJsonDocument doc(docSize);
     DeserializationError err = deserializeJson(doc, bodyBuf);
@@ -207,7 +207,14 @@ void ApiHandlers::handlePostCanvas(AsyncWebServerRequest* req, uint8_t* data, si
     if (err) {
         free(bodyBuf);
         xSemaphoreGive(ctx.renderMutex);
-        String errMsg = "{\"error\":\"Invalid JSON: " + String(err.c_str()) + "\"}";
+        String errMsg;
+        if (err == DeserializationError::NoMemory) {
+            errMsg = "{\"error\":\"JSON too large for parser (" + String(bodyLen) +
+                     " bytes payload, " + String(docSize) + " bytes parser limit). "
+                     "Split into smaller batches using refresh:none, then send final batch with refresh:full.\"}";
+        } else {
+            errMsg = "{\"error\":\"Invalid JSON: " + String(err.c_str()) + "\"}";
+        }
         req->send(400, "application/json", errMsg);
         return;
     }
