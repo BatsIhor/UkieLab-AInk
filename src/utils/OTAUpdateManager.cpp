@@ -130,7 +130,6 @@ bool OTAUpdateManager::fetchLatestRelease() {
     // Mitigations: GitHub HSTS, ESP32 Update library validates firmware magic bytes and CRC.
     client.setInsecure();
     client.setTimeout(15);  // 15 second timeout
-
     HTTPClient http;
 
     String url = String("https://") + GITHUB_API_HOST + "/repos/" +
@@ -339,16 +338,29 @@ bool OTAUpdateManager::parseReleaseJSONMinimal(const String& json, GitHubRelease
 
     Serial.println("Found tag: " + release.tagName);
 
-    // Fetch asset download URLs via a separate API call to avoid parsing large JSON
+    if (!_githubPAT.isEmpty()) {
+        // Private repos: must fetch asset URLs via API (direct URLs require auth)
+        Serial.println("Private repo detected (PAT set), fetching asset URLs via API...");
+        delay(200);  // Let previous SSL connection fully cleanup
 
-    // Small delay to let previous SSL connection fully cleanup
-    delay(200);
+        bool assetsFound = fetchReleaseAssets(release);
+        if (!assetsFound) {
+            Serial.println("Failed to fetch release assets");
+            return false;
+        }
+    } else {
+        // Public repos: construct direct download URLs (no extra API call needed)
+        String firmwareFilename = _currentEnvironment + "-firmware.bin";
+        String spiffsFilename = _currentEnvironment + "-spiffs.bin";
 
-    bool assetsFound = fetchReleaseAssets(release);
+        release.firmwareUrl = "https://github.com/" + _githubUser + "/" + _githubRepo +
+                              "/releases/download/" + release.tagName + "/" + firmwareFilename;
+        release.spiffsUrl = "https://github.com/" + _githubUser + "/" + _githubRepo +
+                            "/releases/download/" + release.tagName + "/" + spiffsFilename;
+        release.firmwareSize = 0;  // Unknown until download
+        release.spiffsSize = 0;
 
-    if (!assetsFound) {
-        Serial.println("Failed to fetch release assets");
-        return false;
+        Serial.println("Using direct download URLs");
     }
 
     Serial.println("Firmware URL: " + release.firmwareUrl);
@@ -370,7 +382,6 @@ bool OTAUpdateManager::fetchReleaseAssets(GitHubRelease& release) {
     WiFiClientSecure client;
     client.setInsecure();
     client.setTimeout(15);  // 15 second timeout
-
     HTTPClient http;
 
     String url = String("https://") + GITHUB_API_HOST + "/repos/" +
@@ -673,14 +684,16 @@ bool OTAUpdateManager::downloadAndInstall(const String& url, int updateType, Pro
 
     // GitHub API asset URLs need Accept: application/octet-stream to get the binary
     // (without it, they return JSON metadata instead of the file).
-    bool isGitHubUrl = url.indexOf("github.com") >= 0;
-    if (isGitHubUrl) {
+    // Direct download URLs (github.com/...releases/download/...) don't need this.
+    bool isApiUrl = url.indexOf("api.github.com") >= 0;
+    if (isApiUrl) {
         http.addHeader("Accept", "application/octet-stream");
         if (!_githubPAT.isEmpty()) {
             Serial.println("Using authenticated API download");
             http.addHeader("Authorization", "Bearer " + _githubPAT);
         }
     }
+    http.addHeader("User-Agent", "ESP32-UkieLabDisplay");
 
     http.setTimeout(HTTP_TIMEOUT);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);  // Follow redirects for GitHub

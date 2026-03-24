@@ -45,6 +45,11 @@ public:
     // Copy back to front without computing dirty rect (after full refresh)
     void swapAfterFullRefresh();
 
+    // Temporarily free/reacquire front buffer to reclaim heap for SSL/OTA.
+    // Single-buffer mode (full refresh) is used while front buffer is released.
+    bool releaseFrontBuffer();
+    bool reacquireFrontBuffer();
+
     // Valid if back buffer is set (front buffer is optional)
     bool isValid() const { return _back != nullptr; }
     bool isDoubleBuffered() const { return _front != nullptr; }

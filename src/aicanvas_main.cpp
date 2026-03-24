@@ -532,7 +532,9 @@ void otaCheckTask(void* param) {
     bool force = p->force;
     delete p;
 
-    Serial.printf("OTA check: Free heap: %d bytes\n", ESP.getFreeHeap());
+    bool hadFrontBuffer = framebuffer.releaseFrontBuffer();
+    Serial.printf("OTA check: Free heap: %d bytes, largest block: %d bytes\n",
+                  ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
     bool hasUpdate = otaManager.checkForUpdates(force);
     GitHubRelease rel = otaManager.getLatestRelease();
@@ -550,12 +552,18 @@ void otaCheckTask(void* param) {
     }
     otaCheckResult.checked = true;
 
+    if (hadFrontBuffer) {
+        delay(500);
+        framebuffer.reacquireFrontBuffer();
+    }
+
     otaTaskRunning = false;
     vTaskDelete(NULL);
 }
 
 // Auto-update task: check and install if newer version is available
 void otaAutoUpdateTask(void* param) {
+    bool hadFrontBuffer = framebuffer.releaseFrontBuffer();
     Serial.println("Auto-update: checking for new firmware...");
     bool hasUpdate = otaManager.checkForUpdates(false);
 
@@ -588,6 +596,11 @@ void otaAutoUpdateTask(void* param) {
         Serial.println("Auto-update: already up to date.");
     }
 
+    if (hadFrontBuffer) {
+        delay(500);
+        framebuffer.reacquireFrontBuffer();
+    }
+
     otaTaskRunning = false;
     vTaskDelete(NULL);
 }
@@ -599,6 +612,8 @@ void otaInstallTask(void* param) {
     int type = p->type;
     delete p;
 
+    bool hadFrontBuffer = framebuffer.releaseFrontBuffer();
+
     bool success = (type == 2)
         ? otaManager.installSPIFFSFromGitHub()
         : otaManager.installFirmwareFromGitHub();
@@ -608,6 +623,11 @@ void otaInstallTask(void* param) {
     if (success) {
         delay(1000);
         ESP.restart();
+    }
+
+    if (hadFrontBuffer) {
+        delay(500);
+        framebuffer.reacquireFrontBuffer();
     }
     vTaskDelete(NULL);
 }

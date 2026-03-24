@@ -126,3 +126,26 @@ void FramebufferManager::swapAfterFullRefresh()
     }
     // Single-buffer mode: no-op
 }
+
+bool FramebufferManager::releaseFrontBuffer()
+{
+    if (!_front) return false;
+    free(_front);
+    _front = nullptr;
+    Serial.printf("FramebufferManager: front buffer released (%u bytes freed)\n", BUFFER_SIZE);
+    return true;
+}
+
+bool FramebufferManager::reacquireFrontBuffer()
+{
+    if (_front) return true;  // Already allocated
+    _front = (uint8_t*)malloc(BUFFER_SIZE);
+    if (_front) {
+        if (_back) memcpy(_front, _back, BUFFER_SIZE);
+        else memset(_front, 0xFF, BUFFER_SIZE);
+        Serial.printf("FramebufferManager: front buffer reacquired (%u bytes)\n", BUFFER_SIZE);
+        return true;
+    }
+    Serial.println("FramebufferManager: front buffer reacquire failed, staying single-buffered");
+    return false;
+}
