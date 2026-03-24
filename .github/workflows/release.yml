@@ -1,88 +1,248 @@
-# Release Pipeline — Build firmware and create a GitHub Release
-name: Release
+name: Production Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version tag (e.g. v0.1.945)"
-        required: true
-        type: string
-      prerelease:
-        description: "Mark as pre-release?"
-        required: false
-        type: boolean
-        default: false
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual trigger
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # Don't cancel release builds
 
 jobs:
-  release:
-    name: Build & Release
+  build-and-release:
     runs-on: ubuntu-latest
-
     permissions:
-      contents: write  # Required for creating releases and uploading assets
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - aicanvas_esp32_75bw
+          - aicanvas_esp32_102bw
 
     steps:
-      - name: Validate version format
-        run: |
-          if [[ ! "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Version must match format vX.Y.Z (e.g. v0.1.945)"
-            exit 1
-          fi
-
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('**/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Cache PlatformIO packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio
-            .pio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: |
-            pio-${{ runner.os }}-
+          python-version: '3.11'
 
       - name: Install PlatformIO
         run: |
           python -m pip install --upgrade pip
-          pip install platformio
+          pip install --upgrade platformio
 
-      - name: Set version in version file
+      - name: Build firmware for ${{ matrix.environment }}
+        run: pio run --environment ${{ matrix.environment }}
+
+      - name: Build filesystem for ${{ matrix.environment }}
+        run: pio run --target buildfs --environment ${{ matrix.environment }}
+
+      - name: Extract version from build
+        id: version
         run: |
-          # Strip leading 'v' and write to version file
-          echo "${{ inputs.version }}" | sed 's/^v//' > version
+          if [ -f include/Version.h ]; then
+            VERSION=$(grep '#define BUILD_TIMESTAMP' include/Version.h | sed 's/.*"\(.*\)".*/\1/')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          else
+            VERSION=$(date -u +'%y%m%d')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          fi
+          echo "Build version: $VERSION"
 
-      - name: Create version marker
-        # Prevent the version increment script from bumping beyond the set version
-        run: touch .version_no_increment
-
-      - name: Build firmware
-        run: pio run -e aicanvas_esp32_75bw
-
-      - name: Build SPIFFS filesystem image
-        run: pio run -e aicanvas_esp32_75bw -t buildfs
-
-      - name: Prepare release assets
+      - name: Prepare binaries
         run: |
-          mkdir -p release-assets
-          cp .pio/build/aicanvas_esp32_75bw/firmware.bin \
-             release-assets/firmware_aicanvas_esp32_75bw.bin
-          cp .pio/build/aicanvas_esp32_75bw/spiffs.bin \
-             release-assets/spiffs_aicanvas_esp32_75bw.bin
+          mkdir -p release-binaries/${{ matrix.environment }}
+
+          cp .pio/build/${{ matrix.environment }}/firmware.bin \
+             release-binaries/${{ matrix.environment }}/${{ matrix.environment }}-firmware.bin
+
+          if [ -f .pio/build/${{ matrix.environment }}/bootloader.bin ]; then
+            cp .pio/build/${{ matrix.environment }}/bootloader.bin \
+               release-binaries/${{ matrix.environment }}/${{ matrix.environment }}-bootloader.bin
+          fi
+
+          if [ -f .pio/build/${{ matrix.environment }}/partitions.bin ]; then
+            cp .pio/build/${{ matrix.environment }}/partitions.bin \
+               release-binaries/${{ matrix.environment }}/${{ matrix.environment }}-partitions.bin
+          fi
+
+          if [ -f .pio/build/${{ matrix.environment }}/spiffs.bin ]; then
+            cp .pio/build/${{ matrix.environment }}/spiffs.bin \
+               release-binaries/${{ matrix.environment }}/${{ matrix.environment }}-spiffs.bin
+          fi
+
+          echo "Environment: ${{ matrix.environment }}" > release-binaries/${{ matrix.environment }}/build-info.txt
+          echo "Version: ${{ steps.version.outputs.version }}" >> release-binaries/${{ matrix.environment }}/build-info.txt
+          echo "Build Date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> release-binaries/${{ matrix.environment }}/build-info.txt
+          echo "Git Commit: ${{ github.sha }}" >> release-binaries/${{ matrix.environment }}/build-info.txt
+
+      - name: Upload binaries as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.environment }}
+          path: release-binaries/${{ matrix.environment }}/*
+          retention-days: 90
+
+  create-release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-binaries
+
+      - name: Flatten binary structure
+        run: |
+          mkdir -p release-files
+          find all-binaries -name "*.bin" -exec cp {} release-files/ \;
+          find all-binaries -name "build-info.txt" -exec sh -c 'cp "$1" "release-files/$(basename $(dirname "$1"))-build-info.txt"' _ {} \;
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(grep 'Version:' release-files/*-build-info.txt | head -n 1 | awk '{print $2}')
+          if [ -z "$VERSION" ]; then
+            VERSION=$(date -u +'%y%m%d')
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: v$VERSION"
+
+      - name: Get commit info
+        id: commit_info
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s (%an)" --no-merges | head -n 20)
+          else
+            COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%an)" --no-merges)
+          fi
+          echo "$COMMITS" > commits.txt
+
+          MERGE_MSG=$(git log -1 --pretty=%B | head -n 1)
+          MERGE_AUTHOR=$(git log -1 --pretty=%an)
+          MERGE_DATE=$(git log -1 --pretty=%cd --date=format:'%Y-%m-%d %H:%M:%S')
+
+          echo "merge_msg=$MERGE_MSG" >> $GITHUB_OUTPUT
+          echo "merge_author=$MERGE_AUTHOR" >> $GITHUB_OUTPUT
+          echo "merge_date=$MERGE_DATE" >> $GITHUB_OUTPUT
+
+      - name: Check if release exists
+        id: check_release
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view ${{ steps.version.outputs.tag }} > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Delete existing release if exists
+        if: steps.check_release.outputs.exists == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete ${{ steps.version.outputs.tag }} --yes || true
+          git push --delete origin ${{ steps.version.outputs.tag }} || true
+          sleep 2
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.version }}
-          name: Release ${{ inputs.version }}
-          generate_release_notes: true
-          prerelease: ${{ inputs.prerelease }}
-          files: |
-            release-assets/firmware_aicanvas_esp32_75bw.bin
-            release-assets/spiffs_aicanvas_esp32_75bw.bin
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Release ${{ steps.version.outputs.tag }}"
+          body: |
+            # AInk - Release ${{ steps.version.outputs.tag }}
+
+            ## Release Information
+            - **Version**: `${{ steps.version.outputs.version }}`
+            - **Build Date**: ${{ steps.commit_info.outputs.merge_date }}
+            - **Commit**: [${{ steps.commit_info.outputs.sha_short }}](${{ github.event.repository.html_url }}/commit/${{ github.sha }})
+            - **Author**: ${{ steps.commit_info.outputs.merge_author }}
+
+            ## What's New
+            ${{ steps.commit_info.outputs.merge_msg }}
+
+            ### Recent Changes
+            $(cat commits.txt)
+
+            ---
+
+            ## Available Firmware Variants
+
+            ### ESP32 - 7.5" E-Paper Display (800x480)
+            - **aicanvas_esp32_75bw-firmware.bin** - Standard configuration
+
+            ### ESP32 - 10.2" E-Paper Display (960x640)
+            - **aicanvas_esp32_102bw-firmware.bin** - Standard configuration
+
+            ## Over-The-Air (OTA) Update
+
+            1. Open your AInk device's web interface
+            2. Navigate to `/update`
+            3. Click **"Check for Updates"**
+            4. Click **"Update Firmware"** to install this release
+
+            ### Manual Installation
+            - **Web Flasher**: [ESPWebTool](https://espressif.github.io/esptool-js/)
+            - **Command Line**: `esptool.py write_flash 0x10000 firmware.bin`
+            - **PlatformIO**: `pio run --target upload`
+
+            ## SPIFFS Filesystem Updates
+
+            If this release includes web interface changes, flash the `*-spiffs.bin` file to update the device's web interface.
+
+            ---
+
+            **Full Changelog**: ${{ github.event.repository.html_url }}/commits/${{ steps.version.outputs.tag }}
+          files: release-files/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release Summary
+        run: |
+          echo "## Release Created Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version**: ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: ${{ steps.commit_info.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Release URL**: ${{ github.event.repository.html_url }}/releases/tag/${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Binary Files Uploaded" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls -lh release-files/ >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

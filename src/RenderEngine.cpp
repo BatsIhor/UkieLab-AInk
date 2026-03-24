@@ -170,10 +170,25 @@ void RenderEngine::execPixel(const JsonObject& cmd, RenderResult& result)
 
 void RenderEngine::execLine(const JsonObject& cmd, RenderResult& result)
 {
-    int16_t x0 = cmd["x0"] | (cmd["x"] | 0);
-    int16_t y0 = cmd["y0"] | (cmd["y"] | 0);
-    int16_t x1 = cmd["x1"] | 0;
-    int16_t y1 = cmd["y1"] | 0;
+    // Support naming conventions: (x0,y0,x1,y1), (x,y,x1,y1), and (x1,y1,x2,y2)
+    // When x2/y2 present: x1,y1 is start, x2,y2 is end
+    // Use containsKey to correctly handle zero coordinates
+    int16_t x0, y0, x1, y1;
+    if (cmd.containsKey("x2") || cmd.containsKey("y2")) {
+        // Agent sent (x1,y1,x2,y2) — "point 1" to "point 2"
+        x0 = cmd.containsKey("x1") ? cmd["x1"].as<int16_t>() : 0;
+        y0 = cmd.containsKey("y1") ? cmd["y1"].as<int16_t>() : 0;
+        x1 = cmd.containsKey("x2") ? cmd["x2"].as<int16_t>() : 0;
+        y1 = cmd.containsKey("y2") ? cmd["y2"].as<int16_t>() : 0;
+    } else {
+        // Standard (x0,y0,x1,y1) or (x,y,x1,y1)
+        x0 = cmd.containsKey("x0") ? cmd["x0"].as<int16_t>()
+           : cmd.containsKey("x")  ? cmd["x"].as<int16_t>() : 0;
+        y0 = cmd.containsKey("y0") ? cmd["y0"].as<int16_t>()
+           : cmd.containsKey("y")  ? cmd["y"].as<int16_t>() : 0;
+        x1 = cmd.containsKey("x1") ? cmd["x1"].as<int16_t>() : 0;
+        y1 = cmd.containsKey("y1") ? cmd["y1"].as<int16_t>() : 0;
+    }
     bool black = resolveColor(cmd["color"]);
     int16_t thickness = cmd["thickness"] | 1;
 

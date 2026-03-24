@@ -1,21 +1,25 @@
-# CI Pipeline — Build & validate on every PR and push to main
+# CI Pipeline — Build & validate on every PR
 name: CI
 
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
 
-# Cancel in-progress runs for the same branch/PR to save runner minutes
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build Firmware
+    name: Build ${{ matrix.environment }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - aicanvas_esp32_75bw
+          - aicanvas_esp32_102bw
 
     steps:
       - name: Checkout repository
@@ -41,22 +45,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install platformio
 
-      - name: Create version marker
-        # Prevent the version increment script from bumping the version during CI
-        run: touch .version_no_increment
-
       - name: Build firmware
-        run: pio run -e aicanvas_esp32_75bw
+        run: pio run -e ${{ matrix.environment }}
 
       - name: Build SPIFFS filesystem image
-        run: pio run -e aicanvas_esp32_75bw -t buildfs
+        run: pio run -e ${{ matrix.environment }} -t buildfs
 
       - name: Upload build artifacts
-        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-pr-${{ github.event.pull_request.number }}
+          name: firmware-${{ matrix.environment }}-pr-${{ github.event.pull_request.number }}
           path: |
-            .pio/build/aicanvas_esp32_75bw/firmware.bin
-            .pio/build/aicanvas_esp32_75bw/spiffs.bin
+            .pio/build/${{ matrix.environment }}/firmware.bin
+            .pio/build/${{ matrix.environment }}/spiffs.bin
           retention-days: 7
