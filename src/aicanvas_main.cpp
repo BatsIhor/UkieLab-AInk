@@ -8,6 +8,7 @@
 #include <ESPmDNS.h>
 #include <Update.h>
 #include <esp_wifi.h>
+#include <esp_sleep.h>
 #include <Preferences.h>
 #include <time.h>
 
@@ -107,9 +108,7 @@ void initDisplay() {
     epd->init(115200, false, 10, false);  // 10ms reset pulse (was 2ms)
     SPI.end();
     SPI.begin(EPD_SCK, EPD_MISO, EPD_MOSI, EPD_CS);
-    Serial.println("EPD SPI initialized, waiting for panel ready...");
-    epd->waitReady();  // Make sure panel is fully ready after init
-    Serial.println("Panel ready");
+    Serial.println("EPD SPI initialized, panel ready");
     epd->fillScreen(GxEPD_WHITE);
     epd->setTextColor(GxEPD_BLACK);
     Serial.printf("Display initialized. Free heap: %d\n", ESP.getFreeHeap());
@@ -431,17 +430,52 @@ void showSetupScreen() {
     if (framebuffer.isValid()) framebuffer.swapAfterFullRefresh();
 }
 
-void showSleepingSetupScreen() {
+void showWelcomeScreen() {
     if (!epd || !epd->buffersValid()) return;
 
     epd->fillScreen(GxEPD_WHITE);
 
-    const GFXfont* font = FontRegistry::findClosest("sans", 18, false);
-    if (font) {
-        epd->setFont(font);
+    const GFXfont* titleFont = FontRegistry::findClosest("sans", 24, true);
+    const GFXfont* bodyFont = FontRegistry::findClosest("sans", 18, false);
+    const GFXfont* boldFont = FontRegistry::findClosest("sans", 18, true);
+    const GFXfont* captionFont = FontRegistry::findClosest("sans", 9, false);
+
+    // Header bar
+    epd->fillRect(0, 0, EPD_WIDTH, 46, GxEPD_BLACK);
+    if (titleFont) {
+        epd->setFont(titleFont);
+        epd->setTextColor(GxEPD_WHITE);
+        epd->setCursor(20, 42);
+        epd->print("Welcome to AInk");
+    }
+
+    // Main message
+    if (bodyFont) {
+        epd->setFont(bodyFont);
         epd->setTextColor(GxEPD_BLACK);
-        epd->setCursor(200, 240);
-        epd->print("Press RESET to begin setup");
+        epd->setCursor(170, 200);
+        epd->print("To begin setup, press the");
+    }
+    if (boldFont) {
+        epd->setFont(boldFont);
+        epd->setCursor(270, 250);
+        epd->print("RESET button");
+    }
+    if (bodyFont) {
+        epd->setFont(bodyFont);
+        epd->setCursor(220, 300);
+        epd->print("on the back of the device");
+    }
+
+    // Footer
+    int footerY = EPD_HEIGHT - 22;
+    epd->fillRect(0, footerY, EPD_WIDTH, 22, GxEPD_BLACK);
+    if (captionFont) {
+        epd->setFont(captionFont);
+        epd->setTextColor(GxEPD_WHITE);
+        String ver = VERSION;
+        epd->setCursor(20, footerY + 14);
+        epd->print("AInk v" + ver + "  |  ukielab.com");
     }
 
     epd->display(false);
@@ -991,15 +1025,15 @@ void setup() {
             mySettings->loop();
 
             if (!otaTaskRunning && millis() - setupModeStartTime > SETUP_INACTIVITY_TIMEOUT) {
-                Serial.println("Setup inactivity timeout");
+                Serial.println("Setup inactivity timeout - entering deep sleep");
                 dnsServer.stop();
-                epd->allocateBuffers();  // Re-allocate briefly for sleep screen
-                showSleepingSetupScreen();
-                // Wait for refresh to complete, then light sleep
+                WiFi.disconnect(true);
+                WiFi.mode(WIFI_OFF);
+                epd->allocateBuffers();
+                showWelcomeScreen();
                 epd->waitReady();
-                delay(1000);
-                // In always-on mode, we just restart instead of deep sleep
-                ESP.restart();
+                epd->powerOff();
+                esp_deep_sleep_start();
             }
 
             delay(10);

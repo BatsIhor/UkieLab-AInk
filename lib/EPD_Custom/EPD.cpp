@@ -330,7 +330,7 @@ void EPD::_sendBuffersToDisplay()
 
     // Only wait for idle if a previous refresh is in progress
     if (_refresh_pending) {
-        _waitBusy("idle", 25000);
+        _waitBusy("idle", 5000);
         _refresh_pending = false;
     }
 
@@ -483,7 +483,7 @@ void EPD::_sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h)
     if (h <= 0 || wBytes <= 0) return;
 
     if (_refresh_pending) {
-        _waitBusy("idle-partial", 25000);
+        _waitBusy("idle-partial", 5000);
         _refresh_pending = false;
     }
 
@@ -634,13 +634,13 @@ void EPD::partialRefresh(int16_t x, int16_t y, int16_t w, int16_t h)
 
 void EPD::waitReady()
 {
-    _waitBusy("waitReady", 25000);
+    _waitBusy("waitReady", 5000);
 }
 
 void EPD::powerOff()
 {
     if (_refresh_pending) {
-        _waitBusy("idle-before-poweroff", 25000);
+        _waitBusy("idle-before-poweroff", 5000);
         _refresh_pending = false;
     }
 #ifdef EPD_PANEL_SSD1677
