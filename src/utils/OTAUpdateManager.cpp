@@ -1,4 +1,5 @@
 #include "../OTAUpdateManager.h"
+#include "../../Settings.h"
 #include "Version.h"
 #include <WiFi.h>
 #include <SPIFFS.h>
@@ -638,8 +639,10 @@ bool OTAUpdateManager::installUpdate(OTAUpdateType type, const String& url, Prog
         return false;
     }
 
-    // If updating SPIFFS, unmount it first (best practice for ESP32)
+    // If updating SPIFFS, backup settings to NVS and unmount
     if (type == OTAUpdateType::SPIFFS) {
+        Serial.println("Backing up settings to NVS before SPIFFS update...");
+        mySettings->backupSettingsToNVS();
         Serial.println("Unmounting SPIFFS before update...");
         SPIFFS.end();
     }
@@ -886,5 +889,9 @@ String OTAUpdateManager::getStatusMessage() const {
 
 String OTAUpdateManager::getErrorMessage() const {
     return _errorMessage;
+}
+
+bool OTAUpdateManager::hasSpiffsUpdate() const {
+    return _latestRelease.isValid && !_latestRelease.spiffsUrl.isEmpty();
 }
 

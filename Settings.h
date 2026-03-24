@@ -40,6 +40,11 @@ public:
   void buildSettingsJson(JsonObject &root);
 
   bool readSettings();
+  bool readSettingsWithNVSCheck();
+
+  bool backupSettingsToNVS();
+  bool hasNVSBackup();
+  bool restoreSettingsFromNVS();
 
   GeneralSettings generalSettings;
   ConnectionSettings connectionSettings;

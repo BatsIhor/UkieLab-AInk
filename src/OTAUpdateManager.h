@@ -71,6 +71,7 @@ public:
     int getProgress() const;  // 0-100
     String getStatusMessage() const;
     String getErrorMessage() const;
+    bool hasSpiffsUpdate() const;
 
     // Utility
     static String getEnvironmentFromBuildFlags();

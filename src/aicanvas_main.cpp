@@ -585,8 +585,15 @@ void otaAutoUpdateTask(void* param) {
     if (hasUpdate) {
         Serial.printf("Auto-update: newer version %s available, installing...\n", rel.tagName.c_str());
         bool success = otaManager.installFirmwareFromGitHub();
+        if (success && otaManager.hasSpiffsUpdate()) {
+            Serial.println("Auto-update: firmware done, installing filesystem...");
+            bool spiffsOk = otaManager.installSPIFFSFromGitHub();
+            if (!spiffsOk) {
+                Serial.println("Auto-update: SPIFFS failed, but firmware updated. Restarting anyway.");
+            }
+        }
         if (success) {
-            Serial.println("Auto-update: firmware installed, restarting...");
+            Serial.println("Auto-update: complete, restarting...");
             delay(1000);
             ESP.restart();
         } else {
@@ -609,14 +616,30 @@ struct OTAInstallTaskParams { int type; };
 
 void otaInstallTask(void* param) {
     OTAInstallTaskParams* p = (OTAInstallTaskParams*)param;
-    int type = p->type;
+    int type = p->type;  // 1=firmware, 2=spiffs, 3=full (firmware+spiffs)
     delete p;
 
     bool hadFrontBuffer = framebuffer.releaseFrontBuffer();
+    bool success = false;
 
-    bool success = (type == 2)
-        ? otaManager.installSPIFFSFromGitHub()
-        : otaManager.installFirmwareFromGitHub();
+    if (type == 3) {
+        // Full update: firmware first, then SPIFFS
+        Serial.println("Full update: installing firmware...");
+        success = otaManager.installFirmwareFromGitHub();
+        if (success && otaManager.hasSpiffsUpdate()) {
+            Serial.println("Firmware done, installing filesystem...");
+            // Settings backup to NVS happens automatically in installUpdate() for SPIFFS
+            success = otaManager.installSPIFFSFromGitHub();
+            if (!success) {
+                Serial.println("SPIFFS update failed, but firmware updated. Restarting anyway.");
+                success = true;  // Firmware was updated, still restart
+            }
+        }
+    } else if (type == 2) {
+        success = otaManager.installSPIFFSFromGitHub();
+    } else {
+        success = otaManager.installFirmwareFromGitHub();
+    }
 
     otaTaskRunning = false;
 
@@ -801,9 +824,9 @@ void setupWebServer() {
             req->send(400, "application/json", r);
             return;
         }
-        String type = "firmware";
+        String type = "full";  // Default to full update
         if (req->hasParam("type", true)) type = req->getParam("type", true)->value();
-        int installType = (type == "spiffs") ? 2 : 1;
+        int installType = (type == "spiffs") ? 2 : (type == "full") ? 3 : 1;
 
         doc["status"] = "started";
         doc["type"] = type;
@@ -943,7 +966,7 @@ void setup() {
 
     // Initialize settings
     Settings::Initialize();
-    mySettings->readSettings();
+    mySettings->readSettingsWithNVSCheck();
 
     // Load auto-update preference from NVS (persists across OTA updates)
     autoUpdateEnabled = nvsGetAutoUpdateEnabled();

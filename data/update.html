@@ -281,11 +281,8 @@
                     <span class="info-value" id="published-at">-</span>
                 </div>
                 <div class="update-buttons">
-                    <button id="firmware-btn" class="btn btn-primary" onclick="installUpdate('firmware')">
-                        Update Firmware
-                    </button>
-                    <button id="spiffs-btn" class="btn btn-secondary" onclick="installUpdate('spiffs')" style="display:none;">
-                        Update Filesystem
+                    <button id="full-btn" class="btn btn-primary" onclick="installUpdate('full')">
+                        Update Device
                     </button>
                 </div>
             </div>
@@ -461,15 +458,8 @@
             } else {
                 document.getElementById('published-at').textContent = '-';
             }
-            document.getElementById('firmware-btn').textContent =
-                isReinstall ? 'Reinstall Firmware' : 'Update Firmware';
-            var spiffsBtn = document.getElementById('spiffs-btn');
-            if (data.spiffsUrl) {
-                spiffsBtn.style.display = 'block';
-                spiffsBtn.textContent = isReinstall ? 'Reinstall Filesystem' : 'Update Filesystem';
-            } else {
-                spiffsBtn.style.display = 'none';
-            }
+            document.getElementById('full-btn').textContent =
+                isReinstall ? 'Reinstall Device' : 'Update Device';
             document.getElementById('update-available').style.display = 'block';
         }
 
@@ -478,10 +468,10 @@
                 showStatus('No update data. Please check for updates first.', 'error');
                 return;
             }
-            var isReinstall = document.getElementById('firmware-btn').textContent.indexOf('Reinstall') >= 0;
-            var msg = type === 'firmware'
-                ? (isReinstall ? 'Reinstall firmware? Device will restart.' : 'Update firmware? Device will restart.')
-                : (isReinstall ? 'Reinstall filesystem? Device will restart.' : 'Update filesystem? Device will restart.');
+            var isReinstall = document.getElementById('full-btn').textContent.indexOf('Reinstall') >= 0;
+            var msg = isReinstall
+                ? 'Reinstall firmware and filesystem? Device will restart.'
+                : 'Update firmware and filesystem? Settings will be preserved. Device will restart.';
             if (!confirm(msg)) return;
 
             document.getElementById('update-available').style.display = 'none';

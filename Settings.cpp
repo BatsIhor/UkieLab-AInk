@@ -1,5 +1,6 @@
 #include "Settings.h"
 #include <SPIFFS.h>
+#include <Preferences.h>
 #include <vector>
 #define FLASHFS SPIFFS
 
@@ -313,4 +314,63 @@ void Settings::reset() {
   saveSettings(true);
 
   Serial.println("Settings reset to defaults");
+}
+
+bool Settings::backupSettingsToNVS() {
+  DynamicJsonDocument json(serializeSettingsSize);
+  JsonObject root = json.to<JsonObject>();
+  buildSettingsJson(root);
+
+  String jsonStr;
+  serializeJson(json, jsonStr);
+
+  Preferences prefs;
+  prefs.begin("settings_bak", false);
+  bool success = prefs.putString("json", jsonStr) > 0;
+  prefs.end();
+
+  Serial.println(success ? "Settings backed up to NVS" : "Failed to backup settings to NVS");
+  return success;
+}
+
+bool Settings::hasNVSBackup() {
+  Preferences prefs;
+  prefs.begin("settings_bak", true);
+  String jsonStr = prefs.getString("json", "");
+  prefs.end();
+  return !jsonStr.isEmpty();
+}
+
+bool Settings::restoreSettingsFromNVS() {
+  Preferences prefs;
+  prefs.begin("settings_bak", true);
+  String jsonStr = prefs.getString("json", "");
+  prefs.end();
+
+  if (jsonStr.isEmpty()) return false;
+
+  File settings = FLASHFS.open(settingsFileName, "w");
+  if (!settings) {
+    Serial.println("Failed to create settings file from NVS backup");
+    return false;
+  }
+  settings.print(jsonStr);
+  settings.close();
+
+  // Clear NVS backup after successful restore
+  Preferences prefsClean;
+  prefsClean.begin("settings_bak", false);
+  prefsClean.clear();
+  prefsClean.end();
+
+  Serial.println("Settings restored from NVS backup");
+  return true;
+}
+
+bool Settings::readSettingsWithNVSCheck() {
+  if (hasNVSBackup()) {
+    Serial.println("NVS settings backup found - restoring after SPIFFS update");
+    restoreSettingsFromNVS();
+  }
+  return readSettings();
 }
