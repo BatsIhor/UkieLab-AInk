@@ -27,6 +27,8 @@
 
 // Multi-reset detector for factory reset (triple press)
 #define ESP_MRD_USE_SPIFFS true
+#define ESP_MRD_USE_EEPROM false
+#define MULTIRESETDETECTOR_DEBUG true
 #define MRD_TIMES 3
 #define MRD_TIMEOUT 10
 #define MRD_ADDRESS 0
@@ -1134,10 +1136,12 @@ void setup() {
         showSetupScreen();
     }
 
-    mrd->stop();
+    // Don't call mrd->stop() here — it would clear the reset counter before
+    // the user can press reset again. Let mrd->loop() handle the timeout.
 }
 
 void loop() {
+    mrd->loop();
     mySettings->loop();
 
     // Check scheduled auto-update (throttled to once per minute)
