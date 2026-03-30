@@ -677,7 +677,7 @@ void setupWebServer() {
         [](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
             static String body;
             if (index == 0) body = "";
-            body += String((char*)data).substring(0, len);
+            body += String((const char*)data, len);
 
             if (index + len == total) {
                 DynamicJsonDocument doc(512);
@@ -866,7 +866,7 @@ void setupWebServer() {
         [](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
             static String body;
             if (index == 0) body = "";
-            body += String((char*)data).substring(0, len);
+            body += String((const char*)data, len);
             if (index + len == total) {
                 DynamicJsonDocument doc(128);
                 if (deserializeJson(doc, body) == DeserializationError::Ok && doc.containsKey("enabled")) {
@@ -990,6 +990,10 @@ void setup() {
 
     // Create render mutex
     renderMutex = xSemaphoreCreateMutex();
+    if (!renderMutex) {
+        Serial.println("FATAL: Failed to create render mutex!");
+        while (true) delay(1000);
+    }
 
     // Initialize font registry
     FontRegistry::init();
@@ -1132,6 +1136,11 @@ void setup() {
         Serial.println("\nWiFi connection failed - starting AP mode");
         WiFi.mode(WIFI_AP_STA);
         WiFi.softAP("UkieLab-AInk");
+        delay(100);
+        IPAddress apIP(192, 168, 4, 1);
+        WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+        dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+        dnsServer.start(53, "*", apIP);
         setupWebServer();
         showSetupScreen();
     }
@@ -1165,6 +1174,7 @@ void loop() {
         }
     }
 
+    dnsServer.processNextRequest();  // no-op when not started; serves captive portal in AP fallback
     // Light sleep between requests to save power
     // WiFi stays connected, HTTP server stays active
     delay(10);

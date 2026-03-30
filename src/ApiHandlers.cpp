@@ -171,7 +171,7 @@ void ApiHandlers::handlePostCanvas(AsyncWebServerRequest* req, uint8_t* data, si
         canvasBody = "";
         canvasBody.reserve(total);
     }
-    canvasBody += String((char*)data).substring(0, len);
+    canvasBody += String((const char*)data, len);
 
     if (index + len != total) return;
 
@@ -449,7 +449,7 @@ void ApiHandlers::handlePostClear(AsyncWebServerRequest* req, uint8_t* data, siz
                                    size_t index, size_t total, Context& ctx)
 {
     if (index == 0) clearBody = "";
-    clearBody += String((char*)data).substring(0, len);
+    clearBody += String((const char*)data, len);
     if (index + len != total) return;
 
     if (xSemaphoreTake(ctx.renderMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
@@ -495,7 +495,7 @@ void ApiHandlers::handlePostZones(AsyncWebServerRequest* req, uint8_t* data, siz
                                    size_t index, size_t total, Context& ctx)
 {
     if (index == 0) zonesBody = "";
-    zonesBody += String((char*)data).substring(0, len);
+    zonesBody += String((const char*)data, len);
     if (index + len != total) return;
 
     DynamicJsonDocument doc(2048);
@@ -574,7 +574,7 @@ void ApiHandlers::handlePostDeviceName(AsyncWebServerRequest* req, uint8_t* data
                                         size_t index, size_t total, Context& ctx)
 {
     if (index == 0) deviceNameBody = "";
-    deviceNameBody += String((char*)data).substring(0, len);
+    deviceNameBody += String((const char*)data, len);
     if (index + len != total) return;
 
     DynamicJsonDocument doc(256);
@@ -616,7 +616,7 @@ void ApiHandlers::handlePostMeasure(AsyncWebServerRequest* req, uint8_t* data, s
         measureBody = "";
         measureBody.reserve(total);
     }
-    measureBody += String((char*)data).substring(0, len);
+    measureBody += String((const char*)data, len);
     if (index + len != total) return;
 
     DynamicJsonDocument doc(4096);

@@ -313,6 +313,12 @@ void Settings::reset() {
 
   saveSettings(true);
 
+  // Overwrite backup so restore path can't revive old WiFi credentials
+  if (FLASHFS.exists(settingsFileNameSave)) {
+    FLASHFS.remove(settingsFileNameSave);
+  }
+  copyFile(settingsFileName, settingsFileNameSave);
+
   Serial.println("Settings reset to defaults");
 }
 
