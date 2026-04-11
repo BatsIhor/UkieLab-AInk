@@ -18,11 +18,23 @@
 #endif
 #define EPD_BUF_SIZE ((EPD_WIDTH * EPD_HEIGHT) / 8)
 
+// SPI clock speed (Hz) — UC8179 supports up to 10 MHz
+#define EPD_SPI_SPEED 8000000
+
+// Force a full refresh every N partial updates to clear ghosting
+#define EPD_FULL_REFRESH_INTERVAL 8
+
 // Refresh modes
 enum EPDRefreshMode {
-    EPD_REFRESH_FULL,     // Full display update with waveform
-    EPD_REFRESH_PARTIAL,  // Partial window update
-    EPD_REFRESH_FAST      // Fast update (reduced ghosting clearance)
+    EPD_REFRESH_FULL,     // Full display update with waveform (ROM LUT, flashes)
+    EPD_REFRESH_PARTIAL,  // Partial window update (custom LUT, no flash)
+    EPD_REFRESH_FAST      // Fast full-screen update (shorter waveform or Gen2 built-in)
+};
+
+// Panel generation — affects fast refresh strategy
+enum EPDPanelGen {
+    EPD_PANEL_GEN1,       // Original GDEY075T7 — use custom fast LUTs
+    EPD_PANEL_GEN2        // GDEY075T7-D2 — use built-in fast refresh registers
 };
 
 // ============================================================
@@ -67,6 +79,10 @@ public:
 
     // Block until any in-progress refresh completes.
     void waitReady();
+
+    // Set panel generation (affects fast refresh strategy).
+    void setPanelGen(EPDPanelGen gen) { _panel_gen = gen; }
+    EPDPanelGen getPanelGen() const { return _panel_gen; }
 
     // -- Drawing primitives
     void drawPixel(int16_t x, int16_t y, uint16_t color);
@@ -124,6 +140,8 @@ private:
     bool _hibernating;
     bool _paging_active;
     bool _refresh_pending;  // true after 0x12 refresh trigger, cleared after wait
+    uint16_t _partial_count; // partial refresh counter for periodic full refresh
+    EPDPanelGen _panel_gen;  // panel generation (Gen1 vs Gen2)
 
     const GFXfont* _font;
     uint16_t _textColor;
@@ -137,8 +155,13 @@ private:
 
     // -- Panel control
     void _initDisplay(uint16_t rst_dur);
+    void _initDisplayPartial();   // Partial-mode init: PSR=0x3F + upload custom LUTs
+    void _initDisplayFast();      // Fast-mode init: PSR=0x3F + fast LUTs or Gen2 registers
+    void _uploadPartialLUT();     // Upload flicker-free partial refresh LUT tables
+    void _uploadFastLUT();        // Upload fast refresh LUT tables (shorter timing)
     void _sendBuffersToDisplay();
     void _sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h);
+    void _sendFastToDisplay();    // Full-screen fast refresh (no flash, shorter waveform)
 
 #ifdef EPD_PANEL_SSD1677
     // SSD1677-specific helpers (10.2" panel)

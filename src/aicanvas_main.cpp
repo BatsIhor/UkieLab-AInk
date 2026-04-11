@@ -451,23 +451,22 @@ void showWelcomeScreen() {
         epd->print("Welcome to AInk");
     }
 
-    // Main message
-    if (bodyFont) {
-        epd->setFont(bodyFont);
-        epd->setTextColor(GxEPD_BLACK);
-        epd->setCursor(170, 200);
-        epd->print("To begin setup, press the");
-    }
-    if (boldFont) {
-        epd->setFont(boldFont);
-        epd->setCursor(270, 250);
-        epd->print("RESET button");
-    }
-    if (bodyFont) {
-        epd->setFont(bodyFont);
-        epd->setCursor(220, 300);
-        epd->print("on the back of the device");
-    }
+    // Main message — centered horizontally
+    epd->setTextColor(GxEPD_BLACK);
+    int16_t tx, ty; uint16_t tw, th;
+
+    auto drawCentered = [&](const GFXfont* font, const char* text, int y) {
+        if (!font) return;
+        epd->setFont(font);
+        epd->getTextBounds(text, 0, 0, &tx, &ty, &tw, &th);
+        int x = (EPD_WIDTH - (int)tw) / 2 - tx;
+        epd->setCursor(x, y);
+        epd->print(text);
+    };
+
+    drawCentered(bodyFont, "To begin setup, press the", 200);
+    drawCentered(boldFont, "RESET button",              250);
+    drawCentered(bodyFont, "on the back of the device", 300);
 
     // Footer
     int footerY = EPD_HEIGHT - 22;
