@@ -50,6 +50,12 @@ public:
     bool releaseFrontBuffer();
     bool reacquireFrontBuffer();
 
+    // Detach the front buffer without freeing — caller takes ownership of the
+    // 48KB allocation and must eventually free() it. Returns nullptr if no
+    // front buffer. After detach, device operates in single-buffer mode until
+    // reacquireFrontBuffer() is called (which will malloc a new one).
+    uint8_t* detachFrontBuffer();
+
     // Valid if back buffer is set (front buffer is optional)
     bool isValid() const { return _back != nullptr; }
     bool isDoubleBuffered() const { return _front != nullptr; }

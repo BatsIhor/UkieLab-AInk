@@ -889,8 +889,14 @@ void setupWebServer() {
         ESP.restart();
     }, [](AsyncWebServerRequest* req, String filename, size_t index, uint8_t* data, size_t len, bool final) {
         if (!index) {
-            Serial.printf("Update: %s\n", filename.c_str());
-            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+            // Support ?type=spiffs for filesystem updates via HTTP
+            bool isSpiffs = req->hasParam("type") && req->getParam("type")->value() == "spiffs";
+            int cmd = isSpiffs ? U_SPIFFS : U_FLASH;
+            if (isSpiffs) {
+                SPIFFS.end();  // Unmount before overwriting
+            }
+            Serial.printf("Update (%s): %s\n", isSpiffs ? "SPIFFS" : "firmware", filename.c_str());
+            if (!Update.begin(UPDATE_SIZE_UNKNOWN, cmd)) {
                 Update.printError(Serial);
             }
         }

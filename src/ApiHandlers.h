@@ -50,4 +50,8 @@ private:
                                       size_t index, size_t total, Context& ctx);
     static void handlePostMeasure(AsyncWebServerRequest* req, uint8_t* data, size_t len,
                                    size_t index, size_t total, Context& ctx);
+    static void handlePostCanvasImage(AsyncWebServerRequest* req, uint8_t* data, size_t len,
+                                       size_t index, size_t total, Context& ctx);
+    static void handlePostCanvasBitmap(AsyncWebServerRequest* req, uint8_t* data, size_t len,
+                                        size_t index, size_t total, Context& ctx);
 };

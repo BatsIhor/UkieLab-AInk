@@ -136,6 +136,16 @@ bool FramebufferManager::releaseFrontBuffer()
     return true;
 }
 
+uint8_t* FramebufferManager::detachFrontBuffer()
+{
+    uint8_t* buf = _front;
+    _front = nullptr;
+    if (buf) {
+        Serial.printf("FramebufferManager: front buffer detached (%u bytes to caller)\n", BUFFER_SIZE);
+    }
+    return buf;
+}
+
 bool FramebufferManager::reacquireFrontBuffer()
 {
     if (_front) return true;  // Already allocated

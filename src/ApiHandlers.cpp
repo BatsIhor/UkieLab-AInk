@@ -13,6 +13,86 @@ static String zonesBody;
 static String deviceNameBody;
 static String measureBody;
 
+// Binary image upload accumulator (raw bytes, not String)
+static uint8_t* imageUploadBuf = nullptr;
+static size_t imageUploadLen = 0;
+
+// Image decode task parameters (shared between HTTP handler and decode task)
+struct ImageDecodeTaskParams {
+    ImageDecoder::BinaryDecodeParams decodeParams;
+    ImageDecoder::DecodeResult result;
+    FramebufferManager* fb;
+    bool hadFrontBuffer;
+    SemaphoreHandle_t doneSemaphore;
+};
+
+static const char* TEMP_IMG_PATH = "/tmp_img.png";
+
+// Always decode directly from RAM. The upload buffer is the detached front buffer
+// (~48KB) and the PNG decoder (~45KB) is heap-allocated. With ~47KB largest free
+// block remaining after detach, both fit simultaneously for any upload size.
+// SPIFFS fallback is kept but should never trigger under normal conditions.
+static const size_t DIRECT_DECODE_THRESHOLD = FramebufferManager::BUFFER_SIZE + 1;
+
+static void imageDecodeTask(void* param)
+{
+    ImageDecodeTaskParams* p = (ImageDecodeTaskParams*)param;
+    size_t pngLen = p->decodeParams.pngLen;
+
+    if (pngLen < DIRECT_DECODE_THRESHOLD) {
+        // Small image: decode directly from RAM (upload buffer + PNG decoder both fit)
+        Serial.printf("Image decode: direct from RAM (%u bytes)\n", pngLen);
+        p->result = ImageDecoder::decodeBinary(p->decodeParams);
+        free(const_cast<uint8_t*>(p->decodeParams.pngData));
+        imageUploadBuf = nullptr;
+    } else {
+        // Large image: write to SPIFFS, free buffer, decode from file
+        Serial.printf("Image decode: via SPIFFS (%u bytes)\n", pngLen);
+
+        File f = SPIFFS.open(TEMP_IMG_PATH, "w");
+        if (!f) {
+            p->result = {false, 0, 0, "Failed to open temp file for write"};
+            free(const_cast<uint8_t*>(p->decodeParams.pngData));
+            imageUploadBuf = nullptr;
+            xSemaphoreGive(p->doneSemaphore);
+            vTaskDelete(nullptr);
+            return;
+        }
+        size_t written = f.write(p->decodeParams.pngData, pngLen);
+        f.close();
+        Serial.printf("Image decode: wrote %u/%u bytes to SPIFFS\n", written, pngLen);
+
+        // Free upload buffer — returns ~48KB to heap for PNG decoder
+        free(const_cast<uint8_t*>(p->decodeParams.pngData));
+        imageUploadBuf = nullptr;
+
+        Serial.printf("Image decode: heap after free: %u, block: %u\n",
+                       ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+
+        if (written != pngLen) {
+            p->result = {false, 0, 0, "SPIFFS write incomplete"};
+            SPIFFS.remove(TEMP_IMG_PATH);
+            xSemaphoreGive(p->doneSemaphore);
+            vTaskDelete(nullptr);
+            return;
+        }
+
+        p->result = ImageDecoder::decodeFile(
+            TEMP_IMG_PATH,
+            p->decodeParams.destX, p->decodeParams.destY,
+            p->decodeParams.destW, p->decodeParams.destH,
+            p->decodeParams.dither,
+            p->decodeParams.framebuffer,
+            p->decodeParams.fbWidth, p->decodeParams.fbHeight
+        );
+
+        SPIFFS.remove(TEMP_IMG_PATH);
+    }
+
+    xSemaphoreGive(p->doneSemaphore);
+    vTaskDelete(nullptr);
+}
+
 void ApiHandlers::setup(AsyncWebServer& server, Context& ctx)
 {
     // GET /device - Device capabilities
@@ -33,6 +113,26 @@ void ApiHandlers::setup(AsyncWebServer& server, Context& ctx)
         nullptr,
         [&ctx](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
             handlePostClear(req, data, len, index, total, ctx);
+        }
+    );
+
+    // POST /canvas/bitmap - Raw 1-bit framebuffer upload (no decoding needed)
+    // NOTE: Must be registered BEFORE /canvas to avoid prefix match collision
+    server.on("/canvas/bitmap", HTTP_POST,
+        [](AsyncWebServerRequest* req) {},
+        nullptr,
+        [&ctx](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
+            handlePostCanvasBitmap(req, data, len, index, total, ctx);
+        }
+    );
+
+    // POST /canvas/image - Binary image upload (PNG body, no JSON/base64 overhead)
+    // NOTE: Must be registered BEFORE /canvas to avoid prefix match collision
+    server.on("/canvas/image", HTTP_POST,
+        [](AsyncWebServerRequest* req) {},
+        nullptr,
+        [&ctx](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
+            handlePostCanvasImage(req, data, len, index, total, ctx);
         }
     );
 
@@ -683,6 +783,248 @@ void ApiHandlers::handlePostMeasure(AsyncWebServerRequest* req, uint8_t* data, s
 
     xSemaphoreGive(ctx.renderMutex);
 
+    String response;
+    serializeJson(respDoc, response);
+    req->send(200, "application/json", response);
+}
+
+// ============ Binary Image Upload ============
+// POST /canvas/image — receives raw PNG bytes (no JSON, no base64)
+// Query params: x, y, w, h, dither (threshold|ordered|floyd_steinberg), refresh (full|none)
+// Memory: only the PNG binary + PNGdec decode buffer needed (~1x image size)
+// For 800x480 display, a typical PNG is 20-100KB which fits comfortably in heap.
+
+// Track whether we detached the front buffer for this upload
+static bool imageUploadDetachedFB = false;
+
+void ApiHandlers::handlePostCanvasImage(AsyncWebServerRequest* req, uint8_t* data, size_t len,
+                                         size_t index, size_t total, Context& ctx)
+{
+    // First chunk: try to reuse front buffer memory as upload buffer
+    if (index == 0) {
+        // Max upload: front buffer size (48KB) fits most 1-bit PNGs of 800x480
+        size_t maxUpload = FramebufferManager::BUFFER_SIZE;
+        if (total > maxUpload) {
+            String msg = "{\"error\":\"Image too large (" + String(total) +
+                         " bytes). Max " + String(maxUpload) +
+                         " bytes. Send a 1-bit PNG for smaller size.\"}";
+            req->send(413, "application/json", msg);
+            return;
+        }
+        // Detach front buffer — gives us its 48KB allocation without
+        // fragmenting the heap (no free+malloc cycle).
+        free(imageUploadBuf);
+        imageUploadDetachedFB = ctx.fb->isDoubleBuffered();
+        if (imageUploadDetachedFB) {
+            imageUploadBuf = ctx.fb->detachFrontBuffer();
+        } else {
+            imageUploadBuf = (uint8_t*)malloc(total);
+        }
+        imageUploadLen = 0;
+        if (!imageUploadBuf) {
+            req->send(500, "application/json", "{\"error\":\"Out of memory for image upload\"}");
+            return;
+        }
+    }
+
+    // Accumulate binary data
+    if (imageUploadBuf && index + len <= total) {
+        memcpy(imageUploadBuf + index, data, len);
+        imageUploadLen = index + len;
+    }
+
+    // Not all data received yet
+    if (index + len != total) return;
+
+    // All data received — decode and render
+    if (!imageUploadBuf) {
+        req->send(500, "application/json", "{\"error\":\"Upload buffer lost\"}");
+        return;
+    }
+
+    // Try to acquire render mutex
+    if (xSemaphoreTake(ctx.renderMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        free(imageUploadBuf);
+        imageUploadBuf = nullptr;
+        req->send(429, "application/json", "{\"error\":\"Display busy\"}");
+        return;
+    }
+
+    // Parse query parameters
+    int16_t destX = req->hasParam("x") ? req->getParam("x")->value().toInt() : 0;
+    int16_t destY = req->hasParam("y") ? req->getParam("y")->value().toInt() : 0;
+    int16_t destW = req->hasParam("w") ? req->getParam("w")->value().toInt() : 0;
+    int16_t destH = req->hasParam("h") ? req->getParam("h")->value().toInt() : 0;
+    String ditherStr = req->hasParam("dither") ? req->getParam("dither")->value() : "ordered";
+    String refreshStr = req->hasParam("refresh") ? req->getParam("refresh")->value() : "full";
+
+    DitherMode dither = DITHER_ORDERED;
+    if (ditherStr == "threshold") dither = DITHER_THRESHOLD;
+    else if (ditherStr == "floyd_steinberg") dither = DITHER_FLOYD_STEINBERG;
+
+    // PNGdec needs ~4KB stack which exceeds async_tcp's stack.
+    // Offload decode to a one-shot FreeRTOS task with 8KB stack.
+    ImageDecodeTaskParams taskParams;
+    taskParams.decodeParams.pngData = imageUploadBuf;
+    taskParams.decodeParams.pngLen = imageUploadLen;
+    taskParams.decodeParams.destX = destX;
+    taskParams.decodeParams.destY = destY;
+    taskParams.decodeParams.destW = destW;
+    taskParams.decodeParams.destH = destH;
+    taskParams.decodeParams.dither = dither;
+    taskParams.decodeParams.framebuffer = ctx.fb->getBackBuffer();
+    taskParams.decodeParams.fbWidth = EPD_WIDTH;
+    taskParams.decodeParams.fbHeight = EPD_HEIGHT;
+    taskParams.fb = ctx.fb;
+    taskParams.hadFrontBuffer = false; // front buffer already detached in accumulation phase
+    taskParams.doneSemaphore = xSemaphoreCreateBinary();
+
+    if (!taskParams.doneSemaphore) {
+        free(imageUploadBuf);
+        imageUploadBuf = nullptr;
+        xSemaphoreGive(ctx.renderMutex);
+        req->send(500, "application/json", "{\"error\":\"Failed to create decode semaphore\"}");
+        return;
+    }
+
+    BaseType_t created = xTaskCreatePinnedToCore(
+        imageDecodeTask, "img_decode", 8192,
+        &taskParams, 1, nullptr, 0  // core 0 (away from async_tcp on core 1)
+    );
+
+    if (created != pdPASS) {
+        vSemaphoreDelete(taskParams.doneSemaphore);
+        free(imageUploadBuf);
+        imageUploadBuf = nullptr;
+        if (imageUploadDetachedFB) {
+            ctx.fb->reacquireFrontBuffer();
+            imageUploadDetachedFB = false;
+        }
+        xSemaphoreGive(ctx.renderMutex);
+        req->send(500, "application/json", "{\"error\":\"Failed to create decode task\"}");
+        return;
+    }
+
+    // Wait for decode to complete (up to 30 seconds)
+    xSemaphoreTake(taskParams.doneSemaphore, pdMS_TO_TICKS(30000));
+    vSemaphoreDelete(taskParams.doneSemaphore);
+
+    // Reacquire front buffer now that decode is done and upload buffer is freed
+    if (imageUploadDetachedFB) {
+        ctx.fb->reacquireFrontBuffer();
+        imageUploadDetachedFB = false;
+    }
+
+    ImageDecoder::DecodeResult dr = taskParams.result;
+
+    if (!dr.success) {
+        xSemaphoreGive(ctx.renderMutex);
+        req->send(400, "application/json", "{\"error\":\"" + dr.error + "\"}");
+        return;
+    }
+
+    // Commit framebuffer
+    FramebufferManager::DirtyRect dirty = ctx.fb->commit();
+
+    // Log the frame
+    ctx.log->beginFrame();
+    ctx.log->addCommand("image");
+    uint32_t frameId = ctx.log->endFrame();
+    ctx.lastFrameId = frameId;
+
+    // Refresh display
+    bool skipRefresh = (refreshStr == "none");
+    if (!dirty.empty && !skipRefresh) {
+#ifdef EPD_PANEL_SSD1677
+        ctx.refreshBusy = true;
+        unsigned long rstart = millis();
+        ctx.epd->display(false);
+        ctx.lastRefreshTimeMs = millis() - rstart;
+        ctx.refreshBusy = false;
+#else
+        ctx.refreshRequested = true;
+        if (ctx.displayTask) {
+            xTaskNotifyGive(ctx.displayTask);
+        }
+#endif
+    }
+
+    xSemaphoreGive(ctx.renderMutex);
+
+    // Response
+    DynamicJsonDocument respDoc(256);
+    respDoc["status"] = "ok";
+    respDoc["frame_id"] = frameId;
+    respDoc["image_width"] = dr.width;
+    respDoc["image_height"] = dr.height;
+    String response;
+    serializeJson(respDoc, response);
+    req->send(200, "application/json", response);
+}
+
+// ============ Raw Bitmap Upload ============
+// Accepts raw 1-bit framebuffer data (EPD_WIDTH * EPD_HEIGHT / 8 bytes).
+// No PNG decoder needed — just memcpy into back buffer. Zero extra heap.
+
+void ApiHandlers::handlePostCanvasBitmap(AsyncWebServerRequest* req, uint8_t* data, size_t len,
+                                          size_t index, size_t total, Context& ctx)
+{
+    const size_t expectedSize = FramebufferManager::BUFFER_SIZE;
+
+    // Validate total size on first chunk
+    if (index == 0 && total != expectedSize) {
+        String msg = "{\"error\":\"Expected " + String(expectedSize) +
+                     " bytes (raw 1-bit " + String(EPD_WIDTH) + "x" + String(EPD_HEIGHT) +
+                     "), got " + String(total) + "\"}";
+        req->send(400, "application/json", msg);
+        return;
+    }
+
+    // Copy each chunk directly into the back buffer — zero extra allocation
+    uint8_t* backBuf = ctx.fb->getBackBuffer();
+    if (backBuf && index + len <= expectedSize) {
+        memcpy(backBuf + index, data, len);
+    }
+
+    // Not all data received yet
+    if (index + len != total) return;
+
+    // All data received — commit and refresh
+    if (xSemaphoreTake(ctx.renderMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        req->send(429, "application/json", "{\"error\":\"Display busy\"}");
+        return;
+    }
+
+    String refreshStr = req->hasParam("refresh") ? req->getParam("refresh")->value() : "full";
+
+    FramebufferManager::DirtyRect dirty = ctx.fb->commit();
+
+    ctx.log->beginFrame();
+    ctx.log->addCommand("bitmap");
+    uint32_t frameId = ctx.log->endFrame();
+    ctx.lastFrameId = frameId;
+
+    bool skipRefresh = (refreshStr == "none");
+    if (!dirty.empty && !skipRefresh) {
+#ifdef EPD_PANEL_SSD1677
+        ctx.refreshBusy = true;
+        unsigned long rstart = millis();
+        ctx.epd->display(false);
+        ctx.lastRefreshTimeMs = millis() - rstart;
+        ctx.refreshBusy = false;
+#else
+        ctx.refreshRequested = true;
+        if (ctx.displayTask) {
+            xTaskNotifyGive(ctx.displayTask);
+        }
+#endif
+    }
+
+    xSemaphoreGive(ctx.renderMutex);
+
+    DynamicJsonDocument respDoc(128);
+    respDoc["status"] = "ok";
+    respDoc["frame_id"] = frameId;
     String response;
     serializeJson(respDoc, response);
     req->send(200, "application/json", response);

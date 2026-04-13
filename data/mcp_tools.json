@@ -83,6 +83,33 @@
       }
     },
     {
+      "name": "display_upload_image",
+      "description": "Upload a PNG image as raw binary to the e-ink display. More memory-efficient than the JSON 'image' command (no base64 overhead). The device decodes the PNG and dithers to 1-bit B/W.\n\nFor images up to ~35KB PNG, this works reliably. For larger images or guaranteed reliability at full display resolution, use display_upload_bitmap instead.\n\nEndpoint: POST /canvas/image with PNG binary body. Query params: x, y (position), w, h (scale, 0=original), dither (threshold|ordered|floyd_steinberg), refresh (full|partial|none).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "x": { "type": "integer", "description": "Destination X coordinate (default: 0)", "default": 0 },
+          "y": { "type": "integer", "description": "Destination Y coordinate (default: 0)", "default": 0 },
+          "w": { "type": "integer", "description": "Destination width (0 = source width)", "default": 0 },
+          "h": { "type": "integer", "description": "Destination height (0 = source height)", "default": 0 },
+          "dither": { "type": "string", "enum": ["threshold", "ordered", "floyd_steinberg"], "description": "Dithering mode (default: ordered)", "default": "ordered" },
+          "refresh": { "type": "string", "enum": ["full", "partial", "none"], "description": "Display refresh mode (default: full)", "default": "full" }
+        },
+        "description": "Note: The actual PNG binary data must be sent as the HTTP request body with Content-Type: application/octet-stream. This tool definition describes the query parameters only."
+      }
+    },
+    {
+      "name": "display_upload_bitmap",
+      "description": "Upload a raw 1-bit packed framebuffer to the e-ink display. This is the MOST EFFICIENT method — zero extra memory on the device, no PNG decoder needed. The body replaces the entire framebuffer.\n\nPayload: exactly (width * height / 8) bytes of raw packed bits. For 800x480: 48000 bytes. For 960x640: 76800 bytes. Pixels packed MSB-first: bit 7 of byte 0 is pixel (0,0). 1 = white, 0 = black. Rows contiguous, no padding.\n\nRecommended for full-resolution images. Workflow:\n1. Resize and dither image on client side\n2. Pack to raw 1-bit MSB-first bytes\n3. POST to /canvas/bitmap\n\nTo overlay on existing content: GET /canvas/screenshot first, composite client-side, then send the merged result.\n\nEndpoint: POST /canvas/bitmap with binary body. Query params: refresh (full|partial|none).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "refresh": { "type": "string", "enum": ["full", "partial", "none"], "description": "Display refresh mode (default: full)", "default": "full" }
+        },
+        "description": "Note: The raw bitmap binary data must be sent as the HTTP request body with Content-Type: application/octet-stream. This tool definition describes the query parameters only."
+      }
+    },
+    {
       "name": "display_info",
       "description": "Get AI Canvas display capabilities, dimensions (800x480, B/W), available fonts, and device status.",
       "inputSchema": {

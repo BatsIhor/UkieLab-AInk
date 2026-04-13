@@ -223,6 +223,84 @@
         }
       }
     },
+    "/canvas/image": {
+      "post": {
+        "summary": "Upload PNG image (binary)",
+        "description": "Upload a PNG image as raw binary HTTP body (no JSON, no base64). The device decodes the PNG and renders it to the framebuffer with optional dithering and scaling. This is more memory-efficient than the JSON 'image' command.\n\nFor images up to ~35KB PNG, this works reliably. For larger images or guaranteed reliability at full display resolution, use POST /canvas/bitmap instead (requires client-side dithering).\n\nThe device dithers grayscale/color to 1-bit B/W. For best results, send a 1-bit or grayscale PNG pre-dithered on the client side.",
+        "parameters": [
+          { "name": "x", "in": "query", "schema": { "type": "integer", "default": 0 }, "description": "Destination X coordinate" },
+          { "name": "y", "in": "query", "schema": { "type": "integer", "default": 0 }, "description": "Destination Y coordinate" },
+          { "name": "w", "in": "query", "schema": { "type": "integer", "default": 0 }, "description": "Destination width (0 = source width)" },
+          { "name": "h", "in": "query", "schema": { "type": "integer", "default": 0 }, "description": "Destination height (0 = source height)" },
+          { "name": "dither", "in": "query", "schema": { "type": "string", "enum": ["threshold", "ordered", "floyd_steinberg"], "default": "ordered" }, "description": "Dithering mode" },
+          { "name": "refresh", "in": "query", "schema": { "type": "string", "enum": ["full", "partial", "none"], "default": "full" }, "description": "Display refresh mode" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": { "type": "string", "format": "binary" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Image rendered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "frame_id": { "type": "integer" },
+                    "image_width": { "type": "integer" },
+                    "image_height": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "PNG decode error or out of memory" },
+          "413": { "description": "Image too large (max ~48KB PNG)" },
+          "429": { "description": "Display busy" }
+        }
+      }
+    },
+    "/canvas/bitmap": {
+      "post": {
+        "summary": "Upload raw 1-bit framebuffer (most efficient)",
+        "description": "Upload a raw 1-bit packed framebuffer as binary HTTP body. This is the most memory-efficient image upload method — zero extra heap allocation on the device, no PNG decoder needed.\n\nThe body must be exactly (display_width * display_height / 8) bytes — 48000 bytes for 800x480, 76800 bytes for 960x640. Pixels are packed MSB-first: bit 7 of byte 0 is pixel (0,0), bit 6 is pixel (1,0), etc. Bit value: 1 = white, 0 = black. Rows are contiguous (no padding).\n\nThis endpoint replaces the ENTIRE framebuffer. To overlay an image on existing content, first GET /canvas/screenshot to read the current framebuffer, composite on the client side, then send the result here.\n\nRecommended workflow for full-resolution images:\n1. Resize and dither the image on the client (Python, Node, etc.)\n2. Pack to raw 1-bit MSB-first bytes\n3. POST to /canvas/bitmap\n\nThis bypasses all ESP32 memory constraints and works reliably at any display resolution.",
+        "parameters": [
+          { "name": "refresh", "in": "query", "schema": { "type": "string", "enum": ["full", "partial", "none"], "default": "full" }, "description": "Display refresh mode" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": { "type": "string", "format": "binary" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bitmap rendered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "frame_id": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Wrong payload size (must be exactly width*height/8 bytes)" },
+          "429": { "description": "Display busy" }
+        }
+      }
+    },
     "/zones": {
       "post": {
         "summary": "Define display zones",

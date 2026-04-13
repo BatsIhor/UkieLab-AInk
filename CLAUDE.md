@@ -62,6 +62,8 @@ pio device monitor
 | GET | `/canvas` | Current frame command log |
 | GET | `/canvas/screenshot` | PBM image of display |
 | POST | `/canvas/clear` | Clear display |
+| POST | `/canvas/image` | Binary PNG upload (no JSON/base64) |
+| POST | `/canvas/bitmap` | Raw 1-bit framebuffer upload (most efficient) |
 | POST/GET/DELETE | `/zones` | Manage named zones |
 | GET | `/health` | Uptime, memory, WiFi status |
 | POST | `/measure` | Measure text dimensions without rendering |

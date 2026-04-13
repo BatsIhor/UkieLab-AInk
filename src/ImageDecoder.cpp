@@ -1,8 +1,10 @@
 #include "ImageDecoder.h"
 #include <PNGdec.h>
 #include <mbedtls/base64.h>
+#include <SPIFFS.h>
 #include <stdlib.h>
 #include <string.h>
+#include <new>
 
 const uint8_t ImageDecoder::_bayerMatrix[8][8] = {
     {  0, 32,  8, 40,  2, 34, 10, 42},
@@ -175,6 +177,45 @@ static int pngDrawCallback(PNGDRAW* pDraw)
     return 1; // continue decoding
 }
 
+// Internal helper: setup PNG callback state and decode
+static ImageDecoder::DecodeResult decodePNG(PNG& png, const uint8_t* fb, int16_t fbW, int16_t fbH,
+                                             int16_t destX, int16_t destY, int16_t destW, int16_t destH,
+                                             DitherMode dither, int16_t srcW, int16_t srcH)
+{
+    ImageDecoder::DecodeResult result = {false, srcW, srcH, ""};
+
+    pngState.framebuffer = const_cast<uint8_t*>(fb);
+    pngState.fbWidth = fbW;
+    pngState.fbHeight = fbH;
+    pngState.destX = destX;
+    pngState.destY = destY;
+    pngState.destW = destW > 0 ? destW : srcW;
+    pngState.destH = destH > 0 ? destH : srcH;
+    pngState.srcW = srcW;
+    pngState.srcH = srcH;
+    pngState.dither = dither;
+
+    // Allocate error diffusion row if needed
+    int16_t* errorRow = nullptr;
+    if (dither == DITHER_FLOYD_STEINBERG) {
+        errorRow = (int16_t*)calloc(pngState.destW, sizeof(int16_t));
+    }
+    pngState.errorRow = errorRow;
+
+    int rc = png.decode(nullptr, 0);
+
+    free(errorRow);
+    png.close();
+
+    if (rc != PNG_SUCCESS) {
+        result.error = "PNG decode failed: " + String(rc);
+        return result;
+    }
+
+    result.success = true;
+    return result;
+}
+
 ImageDecoder::DecodeResult ImageDecoder::decode(const DecodeParams& params)
 {
     DecodeResult result = {false, 0, 0, ""};
@@ -213,49 +254,119 @@ ImageDecoder::DecodeResult ImageDecoder::decode(const DecodeParams& params)
         return result;
     }
 
-    PNG png;
-    int rc = png.openRAM(binData, actualLen, pngDrawCallback);
+    // PNGIMAGE struct is ~45KB (zlib state + buffers) — must be heap-allocated
+    // to avoid stack overflow on async_tcp or small FreeRTOS tasks.
+    PNG* png = new (std::nothrow) PNG();
+    if (!png) {
+        free(binData);
+        result.error = "Out of memory for PNG decoder";
+        return result;
+    }
+
+    int rc = png->openRAM(binData, actualLen, pngDrawCallback);
     if (rc != PNG_SUCCESS) {
+        delete png;
         free(binData);
         result.error = "PNG open failed: " + String(rc);
         return result;
     }
 
-    result.width = png.getWidth();
-    result.height = png.getHeight();
+    result = decodePNG(*png, params.framebuffer, params.fbWidth, params.fbHeight,
+                       params.destX, params.destY, params.destW, params.destH,
+                       params.dither, png->getWidth(), png->getHeight());
 
-    // Setup callback state
-    pngState.framebuffer = params.framebuffer;
-    pngState.fbWidth = params.fbWidth;
-    pngState.fbHeight = params.fbHeight;
-    pngState.destX = params.destX;
-    pngState.destY = params.destY;
-    pngState.destW = params.destW > 0 ? params.destW : result.width;
-    pngState.destH = params.destH > 0 ? params.destH : result.height;
-    pngState.srcW = result.width;
-    pngState.srcH = result.height;
-    pngState.dither = params.dither;
-
-    // Allocate error diffusion row if needed
-    int16_t* errorRow = nullptr;
-    if (params.dither == DITHER_FLOYD_STEINBERG) {
-        int ew = pngState.destW;
-        errorRow = (int16_t*)calloc(ew, sizeof(int16_t));
-    }
-    pngState.errorRow = errorRow;
-
-    rc = png.decode(nullptr, 0);
-
-    free(errorRow);
-    png.close();
+    delete png;
     free(binData);
+    return result;
+}
 
-    if (rc != PNG_SUCCESS) {
-        result.error = "PNG decode failed: " + String(rc);
+ImageDecoder::DecodeResult ImageDecoder::decodeBinary(const BinaryDecodeParams& params)
+{
+    DecodeResult result = {false, 0, 0, ""};
+
+    if (!params.pngData || params.pngLen == 0) {
+        result.error = "No image data";
         return result;
     }
 
-    result.success = true;
+    // PNGIMAGE struct is ~45KB — heap-allocate to avoid stack overflow
+    PNG* png = new (std::nothrow) PNG();
+    if (!png) {
+        result.error = "Out of memory for PNG decoder";
+        return result;
+    }
+
+    int rc = png->openRAM(const_cast<uint8_t*>(params.pngData), params.pngLen, pngDrawCallback);
+    if (rc != PNG_SUCCESS) {
+        delete png;
+        result.error = "PNG open failed: " + String(rc);
+        return result;
+    }
+
+    result = decodePNG(*png, params.framebuffer, params.fbWidth, params.fbHeight,
+                       params.destX, params.destY, params.destW, params.destH,
+                       params.dither, png->getWidth(), png->getHeight());
+
+    delete png;
+    return result;
+}
+
+// SPIFFS file callbacks for PNGdec
+static File spiffsFile;
+
+static void* spiffsOpen(const char* filename, int32_t* pFileSize)
+{
+    spiffsFile = SPIFFS.open(filename, "r");
+    if (!spiffsFile) return nullptr;
+    *pFileSize = spiffsFile.size();
+    return &spiffsFile;
+}
+
+static void spiffsClose(void* pHandle)
+{
+    if (pHandle) {
+        ((File*)pHandle)->close();
+    }
+}
+
+static int32_t spiffsRead(PNGFILE* pFile, uint8_t* pBuf, int32_t iLen)
+{
+    File* f = (File*)pFile->fHandle;
+    return f->read(pBuf, iLen);
+}
+
+static int32_t spiffsSeek(PNGFILE* pFile, int32_t iPosition)
+{
+    File* f = (File*)pFile->fHandle;
+    if (iPosition < 0) iPosition = 0;
+    f->seek(iPosition);
+    return iPosition;
+}
+
+ImageDecoder::DecodeResult ImageDecoder::decodeFile(const char* path,
+    int16_t destX, int16_t destY, int16_t destW, int16_t destH,
+    DitherMode dither, uint8_t* framebuffer, int16_t fbWidth, int16_t fbHeight)
+{
+    DecodeResult result = {false, 0, 0, ""};
+
+    PNG* png = new (std::nothrow) PNG();
+    if (!png) {
+        result.error = "Out of memory for PNG decoder";
+        return result;
+    }
+
+    int rc = png->open(path, spiffsOpen, spiffsClose, spiffsRead, spiffsSeek, pngDrawCallback);
+    if (rc != PNG_SUCCESS) {
+        delete png;
+        result.error = "PNG open failed: " + String(rc);
+        return result;
+    }
+
+    result = decodePNG(*png, framebuffer, fbWidth, fbHeight,
+                       destX, destY, destW, destH,
+                       dither, png->getWidth(), png->getHeight());
+
+    delete png;
     return result;
 }
 
