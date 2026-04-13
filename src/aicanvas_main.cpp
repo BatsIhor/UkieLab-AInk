@@ -659,6 +659,42 @@ void otaInstallTask(void* param) {
 // ============ Web Server Setup ============
 
 void setupWebServer() {
+    // Captive portal probe handlers — must be registered BEFORE serveStatic
+    // so they take priority over the static file catch-all.
+    // iOS
+    server.on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest* req) {
+        req->redirect("http://192.168.4.1/");
+    });
+    // macOS Ventura+
+    server.on("/library/test/success.html", HTTP_GET, [](AsyncWebServerRequest* req) {
+        req->redirect("http://192.168.4.1/");
+    });
+    // Android
+    server.on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* req) {
+        req->redirect("http://192.168.4.1/");
+    });
+    server.on("/gen_204", HTTP_GET, [](AsyncWebServerRequest* req) {
+        req->redirect("http://192.168.4.1/");
+    });
+    // Android (connectivitycheck)
+    server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* req) {
+        req->redirect("http://192.168.4.1/");
+    });
+    // Windows
+    server.on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest* req) {
+        req->redirect("http://192.168.4.1/");
+    });
+    server.on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* req) {
+        req->redirect("http://192.168.4.1/");
+    });
+    // Firefox
+    server.on("/canonical.html", HTTP_GET, [](AsyncWebServerRequest* req) {
+        req->redirect("http://192.168.4.1/");
+    });
+    server.on("/success.txt", HTTP_GET, [](AsyncWebServerRequest* req) {
+        req->redirect("http://192.168.4.1/");
+    });
+
     // Main config page
     server.serveStatic("/", SPIFFS, "/").setDefaultFile("app_config.html");
 
