@@ -13,7 +13,7 @@ EPD::EPD(int16_t cs, int16_t dc, int16_t rst, int16_t busy)
 #ifndef EPD_BW_ONLY
       _red(nullptr), _combinedBuf(nullptr),
 #endif
-      _power_is_on(false), _hibernating(false), _paging_active(false), _refresh_pending(false), _partial_count(0), _panel_gen(EPD_PANEL_GEN1),
+      _power_is_on(false), _hibernating(false), _paging_active(false), _refresh_pending(false),
       _font(nullptr), _textColor(GxEPD_BLACK),
       _cursorX(0), _cursorY(0)
 {
@@ -78,7 +78,7 @@ bool EPD::allocateBuffers()
 
 void EPD::_writeCommand(uint8_t cmd)
 {
-    SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
     digitalWrite(_dc, LOW);
     digitalWrite(_cs, LOW);
     SPI.transfer(cmd);
@@ -88,7 +88,7 @@ void EPD::_writeCommand(uint8_t cmd)
 
 void EPD::_writeData(uint8_t data)
 {
-    SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
     digitalWrite(_dc, HIGH);
     digitalWrite(_cs, LOW);
     SPI.transfer(data);
@@ -246,387 +246,6 @@ void EPD::_initDisplay(uint16_t rst_dur)
 #endif // EPD_PANEL_SSD1677
 }
 
-// ============================================================
-// Custom partial-refresh LUT tables for UC8179 (flicker-free)
-// Adapted from bb_epaper by Larry Bank (bitbank2)
-// These use single-direction voltage drive — no black-white-black flash.
-// ============================================================
-#ifndef EPD_PANEL_SSD1677
-
-// UC8179 LUT register commands
-#define UC8179_LUT_VCOM  0x20
-#define UC8179_LUT_WW    0x21  // white -> white
-#define UC8179_LUT_BW    0x22  // black -> white
-#define UC8179_LUT_WB    0x23  // white -> black
-#define UC8179_LUT_BB    0x24  // black -> black
-
-// Each LUT table: 7 rows × 6 bytes = 42 bytes
-// Format per row: [voltage_pattern, count0, count1, count2, count3, repeat]
-// Voltage pattern bits (2 per phase): 00=GND, 01=VDH(black), 10=VDL(white), 11=float
-
-// VCOM LUT — no VCOM toggling during partial update
-static const uint8_t lut_vcom_partial[] = {
-    0x00, 0x01, 0x20, 0x01, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-// WW (white-to-white): push white (0x80 = 10 00 00 00)
-static const uint8_t lut_ww_partial[] = {
-    0x80, 0x01, 0x20, 0x01, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-// BW (black-to-white): push white (same as WW — drive toward white)
-static const uint8_t lut_bw_partial[] = {
-    0x80, 0x01, 0x20, 0x01, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-// WB (white-to-black): push black (0x40 = 01 00 00 00)
-static const uint8_t lut_wb_partial[] = {
-    0x40, 0x01, 0x20, 0x01, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-// BB (black-to-black): push black (same as WB — drive toward black)
-static const uint8_t lut_bb_partial[] = {
-    0x40, 0x01, 0x20, 0x01, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-void EPD::_uploadPartialLUT()
-{
-    // Upload each LUT table (42 bytes each) to UC8179
-    struct { uint8_t cmd; const uint8_t* data; } tables[] = {
-        { UC8179_LUT_VCOM, lut_vcom_partial },
-        { UC8179_LUT_WW,   lut_ww_partial },
-        { UC8179_LUT_BW,   lut_bw_partial },
-        { UC8179_LUT_WB,   lut_wb_partial },
-        { UC8179_LUT_BB,   lut_bb_partial },
-    };
-
-    for (auto& t : tables) {
-        _writeCommand(t.cmd);
-        SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
-        digitalWrite(_dc, HIGH);
-        digitalWrite(_cs, LOW);
-        for (int i = 0; i < 42; i++) {
-            SPI.transfer(t.data[i]);
-        }
-        digitalWrite(_cs, HIGH);
-        SPI.endTransaction();
-    }
-    Serial.println("EPD: custom partial LUTs uploaded");
-}
-
-void EPD::_initDisplayPartial()
-{
-    // Power Setting (same as full)
-    _writeCommand(0x01);
-    _writeData(0x07);
-    _writeData(0x07);
-    _writeData(0x3f);
-    _writeData(0x3f);
-
-    // Panel Setting: 0x3F = use register LUTs (not ROM OTP)
-    // Bit 5 set: LUT from register instead of OTP
-    _writeCommand(0x00);
-    _writeData(0x3f);
-
-    // Resolution Setting
-    _writeCommand(0x61);
-    _writeData(EPD_WIDTH  >> 8);
-    _writeData(EPD_WIDTH  & 0xFF);
-    _writeData(EPD_HEIGHT >> 8);
-    _writeData(EPD_HEIGHT & 0xFF);
-
-    // Dual SPI disable
-    _writeCommand(0x15);
-    _writeData(0x00);
-
-    // VCOM and Data Interval Setting (partial mode values)
-    _writeCommand(0x50);
-    _writeData(0x29);
-    _writeData(0x07);
-
-    // TCON Setting
-    _writeCommand(0x60);
-    _writeData(0x22);
-
-    // Upload our custom flicker-free LUTs
-    _uploadPartialLUT();
-}
-
-// ============================================================
-// Fast-refresh LUT tables — shorter waveform for speed over contrast
-// Two-phase: brief pre-drive + main drive, fewer frames total
-// ============================================================
-
-// Fast VCOM — minimal activity
-static const uint8_t lut_vcom_fast[] = {
-    0x00, 0x01, 0x0A, 0x00, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-// Fast WW: push white, 10 frames (vs 32 in partial)
-static const uint8_t lut_ww_fast[] = {
-    0x80, 0x01, 0x0A, 0x00, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-// Fast BW: push white, 10 frames
-static const uint8_t lut_bw_fast[] = {
-    0x80, 0x01, 0x0A, 0x00, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-// Fast WB: push black, 10 frames
-static const uint8_t lut_wb_fast[] = {
-    0x40, 0x01, 0x0A, 0x00, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-// Fast BB: push black, 10 frames
-static const uint8_t lut_bb_fast[] = {
-    0x40, 0x01, 0x0A, 0x00, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-void EPD::_uploadFastLUT()
-{
-    struct { uint8_t cmd; const uint8_t* data; } tables[] = {
-        { UC8179_LUT_VCOM, lut_vcom_fast },
-        { UC8179_LUT_WW,   lut_ww_fast },
-        { UC8179_LUT_BW,   lut_bw_fast },
-        { UC8179_LUT_WB,   lut_wb_fast },
-        { UC8179_LUT_BB,   lut_bb_fast },
-    };
-
-    for (auto& t : tables) {
-        _writeCommand(t.cmd);
-        SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
-        digitalWrite(_dc, HIGH);
-        digitalWrite(_cs, LOW);
-        for (int i = 0; i < 42; i++) {
-            SPI.transfer(t.data[i]);
-        }
-        digitalWrite(_cs, HIGH);
-        SPI.endTransaction();
-    }
-    Serial.println("EPD: custom fast LUTs uploaded");
-}
-
-void EPD::_initDisplayFast()
-{
-    if (_panel_gen == EPD_PANEL_GEN2) {
-        // Gen2 panels (GDEY075T7-D2): use built-in fast refresh registers
-        // No custom LUT upload needed — the panel ROM has optimized fast waveforms.
-
-        // Power Setting
-        _writeCommand(0x01);
-        _writeData(0x07);
-        _writeData(0x07);
-        _writeData(0x3f);
-        _writeData(0x3f);
-
-        // Panel Setting: 0x1F = use OTP (ROM) LUTs — Gen2 ROM has good fast waveforms
-        _writeCommand(0x00);
-        _writeData(0x1f);
-
-        // Resolution
-        _writeCommand(0x61);
-        _writeData(EPD_WIDTH  >> 8);
-        _writeData(EPD_WIDTH  & 0xFF);
-        _writeData(EPD_HEIGHT >> 8);
-        _writeData(EPD_HEIGHT & 0xFF);
-
-        // Dual SPI disable
-        _writeCommand(0x15);
-        _writeData(0x00);
-
-        // VCOM and Data Interval
-        _writeCommand(0x50);
-        _writeData(0x29);
-        _writeData(0x07);
-
-        // TCON
-        _writeCommand(0x60);
-        _writeData(0x22);
-
-        // Booster soft start — optimized for Gen2 fast mode
-        _writeCommand(0x06);
-        _writeData(0x27);
-        _writeData(0x27);
-        _writeData(0x18);
-        _writeData(0x17);
-
-        // Enable cascade setting for fast refresh
-        _writeCommand(0xE0);
-        _writeData(0x02);  // Select fast refresh mode
-
-        // Temperature/timing setting for fast refresh
-        _writeCommand(0xE5);
-        _writeData(0x5A);  // Timing parameter for fast mode
-
-        Serial.println("EPD: Gen2 fast refresh registers configured");
-
-    } else {
-        // Gen1 panels: use custom fast LUTs (shorter timing than partial)
-
-        // Power Setting
-        _writeCommand(0x01);
-        _writeData(0x07);
-        _writeData(0x07);
-        _writeData(0x3f);
-        _writeData(0x3f);
-
-        // Panel Setting: 0x3F = use register LUTs
-        _writeCommand(0x00);
-        _writeData(0x3f);
-
-        // Resolution
-        _writeCommand(0x61);
-        _writeData(EPD_WIDTH  >> 8);
-        _writeData(EPD_WIDTH  & 0xFF);
-        _writeData(EPD_HEIGHT >> 8);
-        _writeData(EPD_HEIGHT & 0xFF);
-
-        // Dual SPI disable
-        _writeCommand(0x15);
-        _writeData(0x00);
-
-        // VCOM and Data Interval
-        _writeCommand(0x50);
-        _writeData(0x29);
-        _writeData(0x07);
-
-        // TCON
-        _writeCommand(0x60);
-        _writeData(0x22);
-
-        // Upload fast LUTs (10 frames vs 32 for partial)
-        _uploadFastLUT();
-    }
-}
-
-void EPD::_sendFastToDisplay()
-{
-    if (!_black) { Serial.println("EPD: no buffer!"); return; }
-
-    if (_refresh_pending) {
-        _waitBusy("idle-fast", 5000);
-        _refresh_pending = false;
-    }
-
-    // Count toward periodic full refresh
-    _partial_count++;
-    if (_partial_count >= EPD_FULL_REFRESH_INTERVAL) {
-        Serial.printf("EPD: forcing full refresh (count=%d)\n", _partial_count);
-        _partial_count = 0;
-        _sendBuffersToDisplay();
-        return;
-    }
-
-    Serial.printf("EPD: fast refresh #%d (gen=%d)\n", _partial_count, _panel_gen);
-
-    // Ensure powered on
-    if (!_power_is_on) {
-        _reset(10);
-        _initDisplayFast();
-        _writeCommand(0x04);
-        delay(10);
-        _waitBusy("PowerOn-fast", 1000);
-        _power_is_on = true;
-    } else {
-        _initDisplayFast();
-    }
-
-    // "Old" plane (DTM1): inverted buffer (false-difference trick)
-    _writeCommand(0x10);
-    SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
-    digitalWrite(_dc, HIGH);
-    digitalWrite(_cs, LOW);
-    for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
-        SPI.transfer(~_black[i]);
-        if ((i & 0xFFF) == 0) yield();
-    }
-    digitalWrite(_cs, HIGH);
-    SPI.endTransaction();
-    yield();
-
-    // "New" plane (DTM2): actual image
-    _writeCommand(0x13);
-    SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
-    digitalWrite(_dc, HIGH);
-    digitalWrite(_cs, LOW);
-    for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
-        SPI.transfer(_black[i]);
-        if ((i & 0xFFF) == 0) yield();
-    }
-    digitalWrite(_cs, HIGH);
-    SPI.endTransaction();
-    yield();
-
-    // Trigger refresh
-    _writeCommand(0x12);
-    _refresh_pending = true;
-    delay(200);
-    yield();
-    Serial.printf("EPD: fast refresh triggered (BUSY=%d)\n", digitalRead(_busy));
-}
-
-#endif // !EPD_PANEL_SSD1677
-
 void EPD::init(uint32_t baud, bool initial, uint16_t rst_dur, bool pulldown)
 {
     (void)initial;
@@ -738,7 +357,7 @@ void EPD::_sendBuffersToDisplay()
     for (uint8_t cmd : {0x26, 0x24}) {
         _ssd1677_setPartialRamArea(0, 0, EPD_WIDTH, EPD_HEIGHT);
         _writeCommand(cmd);
-        SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
+        SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
         digitalWrite(_dc, HIGH);
         digitalWrite(_cs, LOW);
         for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
@@ -789,7 +408,7 @@ void EPD::_sendBuffersToDisplay()
     // B/W panel: previous buffer (0x10) = all white, current buffer (0x13) = image data
 
     _writeCommand(0x10);
-    SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
     digitalWrite(_dc, HIGH);
     digitalWrite(_cs, LOW);
     for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
@@ -803,7 +422,7 @@ void EPD::_sendBuffersToDisplay()
     Serial.println("EPD: sending image data to cmd 0x13");
 
     _writeCommand(0x13);
-    SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
     digitalWrite(_dc, HIGH);
     digitalWrite(_cs, LOW);
     for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
@@ -816,7 +435,7 @@ void EPD::_sendBuffersToDisplay()
 #else
     // Tri-color panel: black plane to 0x10, red plane (inverted) to 0x13
     _writeCommand(0x10);
-    SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
     digitalWrite(_dc, HIGH);
     digitalWrite(_cs, LOW);
     for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
@@ -826,7 +445,7 @@ void EPD::_sendBuffersToDisplay()
     SPI.endTransaction();
 
     _writeCommand(0x13);
-    SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
     digitalWrite(_dc, HIGH);
     digitalWrite(_cs, LOW);
     for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
@@ -877,7 +496,7 @@ void EPD::_sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h)
     for (uint8_t cmd : {0x26, 0x24}) {
         _ssd1677_setPartialRamArea(x1, y, w1, h);
         _writeCommand(cmd);
-        SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
+        SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
         digitalWrite(_dc, HIGH);
         digitalWrite(_cs, LOW);
         for (int16_t row = y; row < y + h; row++) {
@@ -896,29 +515,19 @@ void EPD::_sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h)
     _refresh_pending = false;
 
 #else
-    // ---- GD7965 / UC8179 partial update (flicker-free) ----
-
-    // Periodic full refresh to clear accumulated ghosting
-    _partial_count++;
-    if (_partial_count >= EPD_FULL_REFRESH_INTERVAL) {
-        Serial.printf("EPD: forcing full refresh (partial_count=%d)\n", _partial_count);
-        _partial_count = 0;
-        _sendBuffersToDisplay();
-        return;
+    // ---- GD7965 / UC8179 partial update ----
+    if (_power_is_on) {
+        _writeCommand(0x02);
+        _waitBusy("PowerOff-pre", 5000);
+        _power_is_on = false;
     }
 
-    // Ensure power is on (no reset/power-cycle needed for partial)
-    if (!_power_is_on) {
-        _reset(10);
-        _initDisplayPartial();
-        _writeCommand(0x04);
-        delay(10);
-        _waitBusy("PowerOn-partial", 1000);
-        _power_is_on = true;
-    } else {
-        // Already powered — just re-init with partial LUTs (no reset needed)
-        _initDisplayPartial();
-    }
+    _reset(10);
+    _initDisplay(10);
+    _writeCommand(0x04);
+    delay(10);
+    _waitBusy("PowerOn", 1000);
+    _power_is_on = true;
 
     // Set partial window (0x90)
     _writeCommand(0x91); // Enter partial mode
@@ -933,25 +542,9 @@ void EPD::_sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h)
     _writeData((y + h - 1) & 0xFF);
     _writeData(0x01); // PT_SCAN: gates scan inside and outside partial
 
-    // "Old" plane (DTM1, cmd 0x10): send INVERTED buffer (false-difference trick)
-    // By making old != new for every pixel, the controller actively drives all
-    // pixels using our custom partial LUT — no ghosting, no flash.
+    // Send black plane for partial region
     _writeCommand(0x10);
-    SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
-    digitalWrite(_dc, HIGH);
-    digitalWrite(_cs, LOW);
-    for (int16_t row = y; row < y + h; row++) {
-        uint32_t rowOffset = (uint32_t)row * (EPD_WIDTH / 8) + (x1 / 8);
-        for (int16_t col = 0; col < wBytes; col++) {
-            SPI.transfer(~_black[rowOffset + col]); // inverted = false difference
-        }
-    }
-    digitalWrite(_cs, HIGH);
-    SPI.endTransaction();
-
-    // "New" plane (DTM2, cmd 0x13): send actual image data
-    _writeCommand(0x13);
-    SPI.beginTransaction(SPISettings(EPD_SPI_SPEED, MSBFIRST, SPI_MODE0));
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
     digitalWrite(_dc, HIGH);
     digitalWrite(_cs, LOW);
     for (int16_t row = y; row < y + h; row++) {
@@ -963,14 +556,34 @@ void EPD::_sendPartialToDisplay(int16_t x, int16_t y, int16_t w, int16_t h)
     digitalWrite(_cs, HIGH);
     SPI.endTransaction();
 
+    // Send red plane (all white for B/W)
+    _writeCommand(0x13);
+    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+    digitalWrite(_dc, HIGH);
+    digitalWrite(_cs, LOW);
+#ifdef EPD_BW_ONLY
+    for (int16_t row = y; row < y + h; row++) {
+        for (int16_t col = 0; col < wBytes; col++) {
+            SPI.transfer(0x00); // inverted: no red
+        }
+    }
+#else
+    for (int16_t row = y; row < y + h; row++) {
+        uint32_t rowOffset = (uint32_t)row * (EPD_WIDTH / 8) + (x1 / 8);
+        for (int16_t col = 0; col < wBytes; col++) {
+            SPI.transfer(~_red[rowOffset + col]);
+        }
+    }
+#endif
+    digitalWrite(_cs, HIGH);
+    SPI.endTransaction();
+
     // Trigger partial refresh
     _writeCommand(0x12);
-    _refresh_pending = true;
     delay(200);
 
     // Exit partial mode
     _writeCommand(0x92);
-    Serial.printf("EPD: partial refresh #%d triggered\n", _partial_count);
 #endif // EPD_PANEL_SSD1677
 }
 
@@ -1003,13 +616,8 @@ void EPD::display(bool partial)
 void EPD::displayWithMode(EPDRefreshMode mode)
 {
     switch (mode) {
-        case EPD_REFRESH_FAST:
-#ifndef EPD_PANEL_SSD1677
-            _sendFastToDisplay();
-            break;
-#endif
-            // SSD1677 falls through to partial
         case EPD_REFRESH_PARTIAL:
+        case EPD_REFRESH_FAST:
             _sendPartialToDisplay(0, 0, EPD_WIDTH, EPD_HEIGHT);
             break;
         case EPD_REFRESH_FULL:
