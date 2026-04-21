@@ -18,12 +18,26 @@ import io
 import argparse
 from PIL import Image
 
-DISPLAY_IP = "192.168.87.61"
+DISPLAY_IP = "192.168.87.33"
 MEME_API = "https://meme-api.com/gimme"
 HEADERS = {"User-Agent": "AInk-Meme-Bot/1.0"}
 MAX_RETRIES = 10
 DISPLAY_W = 800
 DISPLAY_H = 480
+
+def get_device_info():
+    """Fetch display dimensions from the device."""
+    global DISPLAY_W, DISPLAY_H
+    try:
+        req = urllib.request.Request(f"http://{DISPLAY_IP}/device", headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            info = json.loads(resp.read())
+            DISPLAY_W = info["display"]["width"]
+            DISPLAY_H = info["display"]["height"]
+            print(f"Device connected: {info.get('model', 'Unknown')} ({DISPLAY_W}x{DISPLAY_H})")
+    except Exception as e:
+        print(f"Could not fetch device info ({e}). Using default {DISPLAY_W}x{DISPLAY_H}.")
+
 
 
 def send_commands(commands, refresh="full"):
@@ -172,19 +186,19 @@ def show_meme():
     send_commands(
         [
             {"op": "clear", "color": "white"},
-            {"op": "rect", "x": 0, "y": 0, "w": 800, "h": 44, "color": "black", "fill": True},
+            {"op": "rect", "x": 0, "y": 0, "w": DISPLAY_W, "h": 44, "color": "black", "fill": True},
             {
                 "op": "text", "x": 20, "y": 5, "text": title,
                 "font": "sans", "size": 12, "bold": True, "color": "white",
-                "maxWidth": 760, "overflow": "truncate",
+                "maxWidth": DISPLAY_W - 40, "overflow": "truncate",
             },
-            {"op": "rect", "x": 0, "y": 456, "w": 800, "h": 24, "color": "black", "fill": True},
+            {"op": "rect", "x": 0, "y": DISPLAY_H - 24, "w": DISPLAY_W, "h": 24, "color": "black", "fill": True},
             {
-                "op": "text", "x": 10, "y": 457, "text": sub,
+                "op": "text", "x": 10, "y": DISPLAY_H - 23, "text": sub,
                 "font": "mono", "size": 9, "bold": True, "color": "white",
             },
             {
-                "op": "text", "x": 790, "y": 457, "text": "aink meme machine",
+                "op": "text", "x": DISPLAY_W - 10, "y": DISPLAY_H - 23, "text": "aink meme machine",
                 "font": "mono", "size": 9, "bold": True, "color": "white", "align": "right",
             },
         ],
@@ -263,9 +277,12 @@ def main():
         global DISPLAY_IP
         DISPLAY_IP = args.ip
 
+    # Fetch device capabilities to dynamically set dimensions
+    get_device_info()
+
     if args.loop:
         print(f"Meme machine started! New meme every {args.interval} minutes.")
-        print(f"Display: {DISPLAY_IP}")
+        print(f"Display: {DISPLAY_IP} ({DISPLAY_W}x{DISPLAY_H})")
         print("-" * 50)
         while True:
             try:

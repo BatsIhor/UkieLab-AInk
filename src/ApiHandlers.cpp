@@ -381,6 +381,7 @@ void ApiHandlers::handlePostCanvas(AsyncWebServerRequest* req, uint8_t* data, si
     doc.shrinkToFit();
 
     uint32_t frameId = 0;
+    bool mutexHandedOff = false;  // true when displayRefreshTask will release the mutex
 
     if (!dryRun) {
         // Commit framebuffer (compute dirty rect, copy back→front)
@@ -404,16 +405,24 @@ void ApiHandlers::handlePostCanvas(AsyncWebServerRequest* req, uint8_t* data, si
             ctx.lastRefreshTimeMs = millis() - rstart;
             ctx.refreshBusy = false;
 #else
-            // GD7965: signal background task for non-blocking refresh
+            // GD7965: signal background task for non-blocking refresh.
+            // The display task will release renderMutex after the SPI
+            // transfer completes — do NOT release it here.
             ctx.refreshRequested = true;
             if (ctx.displayTask) {
                 xTaskNotifyGive(ctx.displayTask);
+                mutexHandedOff = true;
             }
 #endif
         }
     }
 
-    xSemaphoreGive(ctx.renderMutex);
+    // Release the mutex only if we didn't hand it off to the display task.
+    // When mutexHandedOff is true, displayRefreshTask releases it after
+    // the EPD SPI transfer finishes, preventing buffer corruption.
+    if (!mutexHandedOff) {
+        xSemaphoreGive(ctx.renderMutex);
+    }
 
     // Build response (returned immediately, display refreshes in background)
     size_t respSize = validate ? 8192 : 1024;
@@ -575,6 +584,7 @@ void ApiHandlers::handlePostClear(AsyncWebServerRequest* req, uint8_t* data, siz
     ctx.lastFrameId = ctx.log->endFrame();
 
     // Refresh display
+    bool mutexHandedOff = false;
 #ifdef EPD_PANEL_SSD1677
     ctx.refreshBusy = true;
     ctx.epd->display(false);
@@ -583,10 +593,13 @@ void ApiHandlers::handlePostClear(AsyncWebServerRequest* req, uint8_t* data, siz
     ctx.refreshRequested = true;
     if (ctx.displayTask) {
         xTaskNotifyGive(ctx.displayTask);
+        mutexHandedOff = true;
     }
 #endif
 
-    xSemaphoreGive(ctx.renderMutex);
+    if (!mutexHandedOff) {
+        xSemaphoreGive(ctx.renderMutex);
+    }
 
     req->send(200, "application/json", "{\"status\":\"ok\"}");
 }
@@ -934,6 +947,7 @@ void ApiHandlers::handlePostCanvasImage(AsyncWebServerRequest* req, uint8_t* dat
 
     // Refresh display
     bool skipRefresh = (refreshStr == "none");
+    bool mutexHandedOff = false;
     if (!dirty.empty && !skipRefresh) {
 #ifdef EPD_PANEL_SSD1677
         ctx.refreshBusy = true;
@@ -945,11 +959,14 @@ void ApiHandlers::handlePostCanvasImage(AsyncWebServerRequest* req, uint8_t* dat
         ctx.refreshRequested = true;
         if (ctx.displayTask) {
             xTaskNotifyGive(ctx.displayTask);
+            mutexHandedOff = true;
         }
 #endif
     }
 
-    xSemaphoreGive(ctx.renderMutex);
+    if (!mutexHandedOff) {
+        xSemaphoreGive(ctx.renderMutex);
+    }
 
     // Response
     DynamicJsonDocument respDoc(256);
@@ -1005,6 +1022,7 @@ void ApiHandlers::handlePostCanvasBitmap(AsyncWebServerRequest* req, uint8_t* da
     ctx.lastFrameId = frameId;
 
     bool skipRefresh = (refreshStr == "none");
+    bool mutexHandedOff = false;
     if (!dirty.empty && !skipRefresh) {
 #ifdef EPD_PANEL_SSD1677
         ctx.refreshBusy = true;
@@ -1016,11 +1034,14 @@ void ApiHandlers::handlePostCanvasBitmap(AsyncWebServerRequest* req, uint8_t* da
         ctx.refreshRequested = true;
         if (ctx.displayTask) {
             xTaskNotifyGive(ctx.displayTask);
+            mutexHandedOff = true;
         }
 #endif
     }
 
-    xSemaphoreGive(ctx.renderMutex);
+    if (!mutexHandedOff) {
+        xSemaphoreGive(ctx.renderMutex);
+    }
 
     DynamicJsonDocument respDoc(128);
     respDoc["status"] = "ok";
@@ -1032,6 +1053,9 @@ void ApiHandlers::handlePostCanvasBitmap(AsyncWebServerRequest* req, uint8_t* da
 
 // ============ Display Refresh Task ============
 // Runs on its own FreeRTOS task so EPD blocking never starves async_tcp.
+// The render mutex is held by the HTTP handler that triggered the refresh
+// and is released HERE after the EPD SPI transfer completes. This prevents
+// a new request from modifying the shared _black buffer mid-transfer.
 
 void ApiHandlers::displayRefreshTask(void* param)
 {
@@ -1054,6 +1078,14 @@ void ApiHandlers::displayRefreshTask(void* param)
         uint32_t elapsed = millis() - start;
         ctx->lastRefreshTimeMs = elapsed;
         ctx->refreshBusy = false;
+
+        // Release the render mutex that the HTTP handler held through the
+        // SPI transfer. This is the critical fix: without this, the mutex
+        // was released before the buffer was fully sent to the EPD, allowing
+        // concurrent modification → washed-out / corrupted display.
+        xSemaphoreGive(ctx->renderMutex);
+
         Serial.printf("Display task: refresh done (%ums)\n", elapsed);
     }
 }
+

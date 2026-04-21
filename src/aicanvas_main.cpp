@@ -35,14 +35,41 @@
 #include <ESP_MultiResetDetector.h>
 MultiResetDetector* mrd = nullptr;
 
-// Hardware pins
-static const uint8_t EPD_BUSY = 4;
-static const uint8_t EPD_CS   = 5;
-static const uint8_t EPD_RST  = 16;
-static const uint8_t EPD_DC   = 17;
-static const uint8_t EPD_SCK  = 18;
-static const uint8_t EPD_MISO = 19;
-static const uint8_t EPD_MOSI = 23;
+// Hardware pins (overridable via build flags for different boards)
+#ifndef EPD_BUSY_PIN
+#define EPD_BUSY_PIN 4
+#endif
+#ifndef EPD_CS_PIN
+#define EPD_CS_PIN 5
+#endif
+#ifndef EPD_RST_PIN
+#define EPD_RST_PIN 16
+#endif
+#ifndef EPD_DC_PIN
+#define EPD_DC_PIN 17
+#endif
+#ifndef EPD_SCK_PIN
+#define EPD_SCK_PIN 18
+#endif
+#ifndef EPD_MISO_PIN
+#define EPD_MISO_PIN 19
+#endif
+#ifndef EPD_MOSI_PIN
+#define EPD_MOSI_PIN 23
+#endif
+// Optional power-enable pin (e.g. Seeed XIAO ePaper EE04 uses GPIO43).
+// When defined, this GPIO is driven HIGH before EPD init to power the panel.
+#ifndef EPD_ENABLE_PIN
+#define EPD_ENABLE_PIN -1
+#endif
+static const int8_t EPD_BUSY   = EPD_BUSY_PIN;
+static const int8_t EPD_CS     = EPD_CS_PIN;
+static const int8_t EPD_RST    = EPD_RST_PIN;
+static const int8_t EPD_DC     = EPD_DC_PIN;
+static const int8_t EPD_SCK    = EPD_SCK_PIN;
+static const int8_t EPD_MISO   = EPD_MISO_PIN;
+static const int8_t EPD_MOSI   = EPD_MOSI_PIN;
+static const int8_t EPD_ENABLE = EPD_ENABLE_PIN;
 
 // Global objects
 EPD* epd = nullptr;
@@ -106,11 +133,26 @@ void handleCaptivePortal(AsyncWebServerRequest* req) {
 
 void initDisplay() {
     Serial.println("Initializing display...");
+    if (EPD_ENABLE >= 0) {
+        pinMode(EPD_ENABLE, OUTPUT);
+        digitalWrite(EPD_ENABLE, HIGH);
+        delay(10);
+        Serial.printf("EPD power-enable HIGH on GPIO%d\n", EPD_ENABLE);
+    }
     epd = new EPD(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY);
     epd->init(115200, false, 10, false);  // 10ms reset pulse (was 2ms)
     SPI.end();
     SPI.begin(EPD_SCK, EPD_MISO, EPD_MOSI, EPD_CS);
     Serial.println("EPD SPI initialized, panel ready");
+
+    // TEST: fill panel fully black on boot to verify deep-black drive.
+    // If this comes out gray, the issue is in the waveform/init (booster/VCOM),
+    // not in the rendering pipeline.
+    Serial.println("BLACK FILL TEST: driving full-screen black");
+    epd->fillScreen(GxEPD_BLACK);
+    epd->display(false);
+    delay(3000);
+
     epd->fillScreen(GxEPD_WHITE);
     epd->setTextColor(GxEPD_BLACK);
     Serial.printf("Display initialized. Free heap: %d\n", ESP.getFreeHeap());
@@ -1029,8 +1071,9 @@ void setup() {
         mySettings->reset();
     }
 
-    // Create render mutex
-    renderMutex = xSemaphoreCreateMutex();
+    // Create render mutex (as binary semaphore to allow cross-task hand-off)
+    renderMutex = xSemaphoreCreateBinary();
+    xSemaphoreGive(renderMutex);
 
     // Initialize font registry
     FontRegistry::init();

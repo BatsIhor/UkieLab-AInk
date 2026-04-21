@@ -143,13 +143,17 @@ void EPD::_waitBusy(const char* msg, uint32_t timeout_ms)
 void EPD::_reset(uint16_t rst_dur_ms)
 {
     if (_rst >= 0) {
-        // Match reference: HIGH → LOW → HIGH with fixed delays (no BUSY check)
+        // Match reference timing: HIGH → LOW → HIGH with generous
+        // post-reset delay so the controller's internal oscillator is fully
+        // settled before we send any configuration commands.
         digitalWrite(_rst, HIGH);
-        delay(10);
+        delay(20);
         digitalWrite(_rst, LOW);
-        delay(rst_dur_ms);
+        delay(rst_dur_ms > 20 ? rst_dur_ms : 20);  // min 20ms reset pulse
         digitalWrite(_rst, HIGH);
-        delay(rst_dur_ms > 10 ? rst_dur_ms : 10);
+        delay(200);  // Other drivers use 200ms; 10ms was too short and caused
+                     // init commands to be lost on some panels, leading to
+                     // washed-out display output.
     }
 }
 
@@ -371,10 +375,9 @@ void EPD::_sendBuffersToDisplay()
         Serial.printf("EPD SSD1677: sent buffer to cmd 0x%02X (BUSY=%d)\n", cmd, digitalRead(_busy));
     }
 
-    Serial.printf("EPD SSD1677: powering on (power=%d, BUSY=%d)\n", _power_is_on, digitalRead(_busy));
-    _ssd1677_powerOn();
-    Serial.printf("EPD SSD1677: power on done (power=%d, BUSY=%d)\n", _power_is_on, digitalRead(_busy));
-
+    // UpdateFull (0xF7) self-contains: Enable Clock + Enable Analog + Load Temp +
+    // Load LUT + Display + Disable Analog + Disable OSC. Explicit PowerOn beforehand
+    // is redundant and can destabilise charge-pump timing for the first rows scanned.
     Serial.println("EPD SSD1677: triggering full refresh...");
     _ssd1677_updateFull();
     _refresh_pending = false;
@@ -455,13 +458,16 @@ void EPD::_sendBuffersToDisplay()
     SPI.endTransaction();
 #endif
 
-    // Trigger display refresh (non-blocking)
+    // Trigger display refresh and wait for the full waveform to complete.
+    // UC8179 full refresh takes ~3s; returning early lets the caller (or the
+    // Arduino loop) touch the bus or re-power the panel mid-waveform, which
+    // aborts the drive and leaves pixels partially grey.
     Serial.println("EPD: triggering refresh (0x12)");
     _writeCommand(0x12);
-    _refresh_pending = true;
-    delay(200);
-    yield();
-    Serial.printf("EPD: refresh triggered (BUSY=%d)\n", digitalRead(_busy));
+    delay(100); // let BUSY assert
+    _waitBusy("refresh", 10000);
+    _refresh_pending = false;
+    Serial.printf("EPD: refresh complete (BUSY=%d)\n", digitalRead(_busy));
 #endif // EPD_PANEL_SSD1677
 }
 
