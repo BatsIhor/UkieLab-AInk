@@ -12,6 +12,7 @@ static String clearBody;
 static String zonesBody;
 static String deviceNameBody;
 static String measureBody;
+static String waveformTestBody;
 
 // Binary image upload accumulator (raw bytes, not String)
 static uint8_t* imageUploadBuf = nullptr;
@@ -123,6 +124,19 @@ void ApiHandlers::setup(AsyncWebServer& server, Context& ctx)
         nullptr,
         [&ctx](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
             handlePostCanvasBitmap(req, data, len, index, total, ctx);
+        }
+    );
+
+    // POST /canvas/waveform_test - Render a solid test pattern with tunable
+    // controller-level waveform knobs (0x06 booster, 0x50 CDI, 0x82 VCOM_DC,
+    // 0xe0 cascade, 0xe5 force-temp). Used to diagnose washed-out blacks on
+    // weak-OTP panel variants.
+    // NOTE: Must be registered BEFORE /canvas to avoid prefix match collision
+    server.on("/canvas/waveform_test", HTTP_POST,
+        [](AsyncWebServerRequest* req) {},
+        nullptr,
+        [&ctx](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
+            handlePostWaveformTest(req, data, len, index, total, ctx);
         }
     );
 
@@ -1049,6 +1063,171 @@ void ApiHandlers::handlePostCanvasBitmap(AsyncWebServerRequest* req, uint8_t* da
     String response;
     serializeJson(respDoc, response);
     req->send(200, "application/json", response);
+}
+
+// ============ Waveform Test Handler ============
+// Renders a solid test pattern using a runtime-tunable waveform. Lets us
+// iterate on controller-level knobs (booster 0x06, CDI 0x50, VCOM_DC 0x82,
+// cascade 0xe0, force-temp 0xe5) without reflashing, to fix washed-out
+// blacks on weak-OTP panel variants.
+//
+// JSON body (all fields optional; defaults preserve current behavior):
+//   pattern: "black" | "white" | "half_h" | "half_v" | "vbars" | "quarters" | "checker"
+//   panel: int (0x00 byte, default 31 = 0x1f)
+//   booster_enabled: bool (default false)
+//   booster: [b0,b1,b2,b3]   (default datasheet [0x17,0x17,0x28,0x17]; TRMNL GEN2 [0x27,0x27,0x18,0x17])
+//   cdi: [b0,b1]             (default [0x29,0x07])
+//   vcom_dc_enabled: bool, vcom_dc: int (default 0x26)
+//   force_temp_enabled: bool, force_temp: int (default 0x5a = 90C)
+//   cascade_enabled: bool, cascade: int (default 0x02)
+static void fillWaveformPattern(uint8_t* buf, size_t size, const String& pattern)
+{
+    const int stride = EPD_WIDTH / 8;
+    if (pattern == "black") {
+        memset(buf, 0x00, size);
+    } else if (pattern == "white") {
+        memset(buf, 0xFF, size);
+    } else if (pattern == "half_h") {
+        // left half black, right half white
+        for (int y = 0; y < EPD_HEIGHT; y++) {
+            uint8_t* row = buf + y * stride;
+            memset(row, 0x00, stride / 2);
+            memset(row + stride / 2, 0xFF, stride - stride / 2);
+        }
+    } else if (pattern == "half_v") {
+        // top half black, bottom half white
+        memset(buf, 0x00, (size_t)(EPD_HEIGHT / 2) * stride);
+        memset(buf + (size_t)(EPD_HEIGHT / 2) * stride, 0xFF,
+               size - (size_t)(EPD_HEIGHT / 2) * stride);
+    } else if (pattern == "vbars") {
+        // 4 vertical bars: black, white, black, white
+        for (int y = 0; y < EPD_HEIGHT; y++) {
+            uint8_t* row = buf + y * stride;
+            int q = stride / 4;
+            memset(row,         0x00, q);
+            memset(row + q,     0xFF, q);
+            memset(row + 2 * q, 0x00, q);
+            memset(row + 3 * q, 0xFF, stride - 3 * q);
+        }
+    } else if (pattern == "quarters") {
+        // BW/WB quadrants
+        int halfRows = EPD_HEIGHT / 2;
+        int halfCols = stride / 2;
+        for (int y = 0; y < EPD_HEIGHT; y++) {
+            uint8_t* row = buf + y * stride;
+            bool top = (y < halfRows);
+            memset(row,            top ? 0x00 : 0xFF, halfCols);
+            memset(row + halfCols, top ? 0xFF : 0x00, stride - halfCols);
+        }
+    } else if (pattern == "checker") {
+        // 50px checkerboard — lets you see per-pixel black vs. white adjacency
+        const int block = 50;
+        for (int y = 0; y < EPD_HEIGHT; y++) {
+            uint8_t* row = buf + y * stride;
+            int yBlock = y / block;
+            for (int xByte = 0; xByte < stride; xByte++) {
+                // each byte = 8 px; block boundaries don't align with bytes
+                // so compute each pixel
+                uint8_t b = 0;
+                for (int bit = 0; bit < 8; bit++) {
+                    int x = xByte * 8 + bit;
+                    int xBlock = x / block;
+                    bool black = ((yBlock + xBlock) & 1) == 0;
+                    if (!black) b |= (0x80 >> bit);
+                }
+                row[xByte] = b;
+            }
+        }
+    } else {
+        // Unknown pattern -> white
+        memset(buf, 0xFF, size);
+    }
+}
+
+void ApiHandlers::handlePostWaveformTest(AsyncWebServerRequest* req, uint8_t* data, size_t len,
+                                          size_t index, size_t total, Context& ctx)
+{
+    if (index == 0) waveformTestBody = "";
+    waveformTestBody += String((char*)data).substring(0, len);
+    if (index + len != total) return;
+
+    DynamicJsonDocument doc(1024);
+    auto err = deserializeJson(doc, waveformTestBody);
+    waveformTestBody = "";
+    if (err) {
+        req->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+
+    if (xSemaphoreTake(ctx.renderMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        req->send(429, "application/json", "{\"error\":\"Display busy\"}");
+        return;
+    }
+
+    // Build tuning: start from current, then apply any overrides in the body.
+    WaveformTuning t = ctx.epd->getWaveformTuning();
+    if (doc.containsKey("panel"))            t.panel_setting     = (uint8_t)doc["panel"].as<int>();
+    if (doc.containsKey("booster_enabled"))  t.booster_enabled   = doc["booster_enabled"].as<bool>();
+    if (doc["booster"].is<JsonArray>() && doc["booster"].size() == 4) {
+        for (int i = 0; i < 4; i++) t.booster[i] = (uint8_t)doc["booster"][i].as<int>();
+    }
+    if (doc["cdi"].is<JsonArray>() && doc["cdi"].size() == 2) {
+        t.cdi[0] = (uint8_t)doc["cdi"][0].as<int>();
+        t.cdi[1] = (uint8_t)doc["cdi"][1].as<int>();
+    }
+    if (doc.containsKey("vcom_dc_enabled"))    t.vcom_dc_enabled    = doc["vcom_dc_enabled"].as<bool>();
+    if (doc.containsKey("vcom_dc"))            t.vcom_dc            = (uint8_t)doc["vcom_dc"].as<int>();
+    if (doc.containsKey("force_temp_enabled")) t.force_temp_enabled = doc["force_temp_enabled"].as<bool>();
+    if (doc.containsKey("force_temp"))         t.force_temp         = (uint8_t)doc["force_temp"].as<int>();
+    if (doc.containsKey("cascade_enabled"))    t.cascade_enabled    = doc["cascade_enabled"].as<bool>();
+    if (doc.containsKey("cascade"))            t.cascade            = (uint8_t)doc["cascade"].as<int>();
+    ctx.epd->setWaveformTuning(t);
+
+    String pattern = doc["pattern"].isNull() ? String("black") : String(doc["pattern"].as<const char*>());
+
+    // Fill back buffer with the requested pattern
+    uint8_t* backBuf = ctx.fb->getBackBuffer();
+    if (backBuf) {
+        fillWaveformPattern(backBuf, FramebufferManager::BUFFER_SIZE, pattern);
+    }
+    ctx.fb->commit();
+
+    ctx.log->beginFrame();
+    ctx.log->addCommand("waveform_test");
+    ctx.lastFrameId = ctx.log->endFrame();
+
+    bool mutexHandedOff = false;
+#ifdef EPD_PANEL_SSD1677
+    ctx.refreshBusy = true;
+    ctx.epd->display(false);
+    ctx.refreshBusy = false;
+#else
+    ctx.refreshRequested = true;
+    if (ctx.displayTask) {
+        xTaskNotifyGive(ctx.displayTask);
+        mutexHandedOff = true;
+    }
+#endif
+    if (!mutexHandedOff) xSemaphoreGive(ctx.renderMutex);
+
+    // Echo applied tuning
+    DynamicJsonDocument resp(512);
+    resp["status"]  = "ok";
+    resp["pattern"] = pattern;
+    resp["panel"]   = t.panel_setting;
+    resp["booster_enabled"] = t.booster_enabled;
+    JsonArray ba = resp.createNestedArray("booster");
+    for (int i = 0; i < 4; i++) ba.add(t.booster[i]);
+    JsonArray ca = resp.createNestedArray("cdi");
+    ca.add(t.cdi[0]); ca.add(t.cdi[1]);
+    resp["vcom_dc_enabled"]    = t.vcom_dc_enabled;
+    resp["vcom_dc"]            = t.vcom_dc;
+    resp["force_temp_enabled"] = t.force_temp_enabled;
+    resp["force_temp"]         = t.force_temp;
+    resp["cascade_enabled"]    = t.cascade_enabled;
+    resp["cascade"]            = t.cascade;
+    String out; serializeJson(resp, out);
+    req->send(200, "application/json", out);
 }
 
 // ============ Display Refresh Task ============

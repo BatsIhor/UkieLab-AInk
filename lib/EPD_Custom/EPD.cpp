@@ -201,9 +201,18 @@ void EPD::_initDisplay(uint16_t rst_dur)
     _writeData(0x3f);
 
 #ifdef EPD_BW_ONLY
-    // Panel Setting: KW (B/W) mode
+    // Booster Soft Start (0x06) — higher values drive stronger black
+    if (_tuning.booster_enabled) {
+        _writeCommand(0x06);
+        _writeData(_tuning.booster[0]);
+        _writeData(_tuning.booster[1]);
+        _writeData(_tuning.booster[2]);
+        _writeData(_tuning.booster[3]);
+    }
+
+    // Panel Setting: KW (B/W) mode by default (0x1f = full OTP LUT)
     _writeCommand(0x00);
-    _writeData(0x1f);
+    _writeData(_tuning.panel_setting);
 
     // Resolution Setting
     _writeCommand(0x61);
@@ -216,14 +225,32 @@ void EPD::_initDisplay(uint16_t rst_dur)
     _writeCommand(0x15);
     _writeData(0x00);
 
-    // VCOM and Data Interval Setting (B/W: LUTKW, N2OCP copy new to old)
+    // VCOM and Data Interval Setting
     _writeCommand(0x50);
-    _writeData(0x29);
-    _writeData(0x07);
+    _writeData(_tuning.cdi[0]);
+    _writeData(_tuning.cdi[1]);
 
     // TCON Setting
     _writeCommand(0x60);
     _writeData(0x22);
+
+    // VCOM_DC (0x82) — typ. -2.0V (0x26) for darker blacks
+    if (_tuning.vcom_dc_enabled) {
+        _writeCommand(0x82);
+        _writeData(_tuning.vcom_dc);
+    }
+    // Cascade setting (0xE0) — GEN2 tune uses 0x02
+    if (_tuning.cascade_enabled) {
+        _writeCommand(0xE0);
+        _writeData(_tuning.cascade);
+    }
+    // Force temperature (0xE5) — tricks controller into using a stronger
+    // hot-weather waveform. 0x5a emulates ~90C. Often the single biggest
+    // knob for fixing washed-out blacks on weak-OTP panels.
+    if (_tuning.force_temp_enabled) {
+        _writeCommand(0xE5);
+        _writeData(_tuning.force_temp);
+    }
 #else
     // Panel Setting: KWR (tri-color) mode
     _writeCommand(0x00);

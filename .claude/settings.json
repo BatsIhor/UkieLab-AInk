@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:trmnl.com)",
+      "Read(//tmp/**)",
+      "Read(//private/tmp/**)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
+    ]
+  }
+}

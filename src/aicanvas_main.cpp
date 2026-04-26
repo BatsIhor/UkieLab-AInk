@@ -148,10 +148,10 @@ void initDisplay() {
     // TEST: fill panel fully black on boot to verify deep-black drive.
     // If this comes out gray, the issue is in the waveform/init (booster/VCOM),
     // not in the rendering pipeline.
-    Serial.println("BLACK FILL TEST: driving full-screen black");
-    epd->fillScreen(GxEPD_BLACK);
-    epd->display(false);
-    delay(3000);
+    // Serial.println("BLACK FILL TEST: driving full-screen black");
+    // epd->fillScreen(GxEPD_BLACK);
+    // epd->display(false);
+    // delay(3000);
 
     epd->fillScreen(GxEPD_WHITE);
     epd->setTextColor(GxEPD_BLACK);

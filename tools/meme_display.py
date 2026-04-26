@@ -18,7 +18,7 @@ import io
 import argparse
 from PIL import Image
 
-DISPLAY_IP = "192.168.87.33"
+DISPLAY_IP = "192.168.87.49"
 MEME_API = "https://meme-api.com/gimme"
 HEADERS = {"User-Agent": "AInk-Meme-Bot/1.0"}
 MAX_RETRIES = 10

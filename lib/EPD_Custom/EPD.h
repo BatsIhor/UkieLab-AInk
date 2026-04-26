@@ -25,6 +25,33 @@ enum EPDRefreshMode {
     EPD_REFRESH_FAST      // Fast update (reduced ghosting clearance)
 };
 
+// Runtime-tunable waveform knobs for GD7965 / UC8179 B/W panels.
+// Defaults mirror the standard init sequence. Override via
+// setWaveformTuning() to compensate for weak-OTP panel variants that
+// render washed-out blacks.
+//
+// Reference (bitbank2/bb_epaper GEN2 — the darker-blacks tune TRMNL ships):
+//   booster_enabled=true, booster={0x27,0x27,0x18,0x17}
+//   cdi={0x21,0x07}
+//   vcom_dc_enabled=true, vcom_dc=0x26
+//   force_temp_enabled=true, force_temp=0x5a
+//   cascade_enabled=true,  cascade=0x02
+struct WaveformTuning {
+    // Defaults = TRMNL GEN2 tune (bitbank2/bb_epaper epd75_init_fast_gen2).
+    // Verified on-device to fix washed-out blacks on weak-OTP GD7965 variants
+    // and to remain correct on spec-compliant panels.
+    uint8_t panel_setting      = 0x1f;                      // 0x00 PSR — KW (B/W), full OTP LUT
+    bool    booster_enabled    = true;                      // 0x06 Booster Soft Start
+    uint8_t booster[4]         = {0x27, 0x27, 0x18, 0x17};  // stronger soft-start boost
+    uint8_t cdi[2]             = {0x21, 0x07};              // 0x50 VCOM / data interval
+    bool    vcom_dc_enabled    = true;                      // 0x82 VCOM_DC
+    uint8_t vcom_dc            = 0x26;                      // -2.0V
+    bool    force_temp_enabled = true;                      // 0xE5 force temperature
+    uint8_t force_temp         = 0x5a;                      // emulate ~90C -> deeper waveform
+    bool    cascade_enabled    = true;                      // 0xE0 cascade setting
+    uint8_t cascade            = 0x02;
+};
+
 // ============================================================
 // EPD -- custom full-buffer driver for B/W e-paper displays
 // Supported panels:
@@ -106,6 +133,10 @@ public:
     void setTextSize(uint8_t s)  { (void)s; }
     void drawPaged(void (*cb)(const void*), const void* param) { cb(param); }
 
+    // -- Waveform tuning (applied on next _initDisplay, i.e. next full refresh)
+    void setWaveformTuning(const WaveformTuning& t) { _tuning = t; }
+    const WaveformTuning& getWaveformTuning() const { return _tuning; }
+
 private:
     int16_t _cs, _dc, _rst, _busy;
 
@@ -128,6 +159,8 @@ private:
     const GFXfont* _font;
     uint16_t _textColor;
     int16_t  _cursorX, _cursorY;
+
+    WaveformTuning _tuning;
 
     // -- HAL
     void _writeCommand(uint8_t cmd);
