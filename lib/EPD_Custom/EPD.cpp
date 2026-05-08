@@ -14,6 +14,7 @@ EPD::EPD(int16_t cs, int16_t dc, int16_t rst, int16_t busy)
       _red(nullptr), _combinedBuf(nullptr),
 #endif
       _power_is_on(false), _hibernating(false), _paging_active(false), _refresh_pending(false),
+      _first_render(true),
       _font(nullptr), _textColor(GxEPD_BLACK),
       _cursorX(0), _cursorY(0)
 {
@@ -435,19 +436,27 @@ void EPD::_sendBuffersToDisplay()
     Serial.printf("EPD: buffer has %u non-white bytes of %u\n", nonWhite, EPD_BUF_SIZE);
 
 #ifdef EPD_BW_ONLY
-    // B/W panel: previous buffer (0x10) = all white, current buffer (0x13) = image data
-
-    _writeCommand(0x10);
-    SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
-    digitalWrite(_dc, HIGH);
-    digitalWrite(_cs, LOW);
-    for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
-        SPI.transfer(0xFF);
-        if ((i & 0xFFF) == 0) yield();
+    // B/W panel: previous buffer (0x10) = previous frame state, current buffer (0x13) = new image.
+    // On the first render (blank panel), seed 0x10 with all-white so the waveform LUT
+    // sees correct WW/WB/BW/BB transitions. After the first refresh, the controller's
+    // N2OCP bit (CDI 0x50 bit0=1) auto-copies 0x13→0x10, and display RAM survives the
+    // hardware reset between renders. Overwriting 0x10 with 0xFF on every refresh
+    // destroys that state and causes subsequent renders to appear faded because pixels
+    // that were black are incorrectly treated as white for waveform transition purposes.
+    if (_first_render) {
+        _writeCommand(0x10);
+        SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+        digitalWrite(_dc, HIGH);
+        digitalWrite(_cs, LOW);
+        for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) {
+            SPI.transfer(0xFF);
+            if ((i & 0xFFF) == 0) yield();
+        }
+        digitalWrite(_cs, HIGH);
+        SPI.endTransaction();
+        yield();
+        Serial.println("EPD: first render — seeded 0x10 with all-white");
     }
-    digitalWrite(_cs, HIGH);
-    SPI.endTransaction();
-    yield();
 
     Serial.println("EPD: sending image data to cmd 0x13");
 
@@ -494,6 +503,7 @@ void EPD::_sendBuffersToDisplay()
     delay(100); // let BUSY assert
     _waitBusy("refresh", 10000);
     _refresh_pending = false;
+    _first_render = false; // N2OCP has now auto-copied 0x13→0x10 in controller RAM
     Serial.printf("EPD: refresh complete (BUSY=%d)\n", digitalRead(_busy));
 #endif // EPD_PANEL_SSD1677
 }

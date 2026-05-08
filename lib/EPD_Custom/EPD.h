@@ -155,6 +155,7 @@ private:
     bool _hibernating;
     bool _paging_active;
     bool _refresh_pending;  // true after 0x12 refresh trigger, cleared after wait
+    bool _first_render;     // true until the first full display refresh completes
 
     const GFXfont* _font;
     uint16_t _textColor;
