@@ -88,6 +88,10 @@ bool shouldRedirectToWifi = false;
 unsigned long setupModeStartTime = 0;
 const unsigned long SETUP_INACTIVITY_TIMEOUT = 5 * 60 * 1000;
 
+// Retry the saved Wi-Fi network this often when it was unreachable at boot
+static const unsigned long WIFI_RETRY_INTERVAL_MS = 60UL * 1000UL;
+static unsigned long lastWifiRetry = 0;
+
 // NVS namespace for auto-update settings (survives OTA firmware updates)
 static const char* NVS_NAMESPACE  = "aink_cfg";
 static const char* NVS_KEY_AUTO   = "auto_upd";
@@ -570,11 +574,14 @@ void nvsSetLastAutoUpdateDay(uint32_t day) {
 
 struct OTACheckTaskParams { bool force; };
 
-void otaCheckTask(void* param) {
-    OTACheckTaskParams* p = (OTACheckTaskParams*)param;
-    bool force = p->force;
-    delete p;
+// NOTE on task bodies: vTaskDelete(NULL) never returns, so C++ destructors of
+// locals still in scope at that point never run. GitHubRelease holds six
+// Arduino Strings; keeping one alive across vTaskDelete leaked ~220 bytes of
+// heap on every update check that found nothing to install. Each task's work
+// therefore lives in its own *Run() function so every local is destroyed on
+// return, before the task deletes itself.
 
+static void otaCheckRun(bool force) {
     bool hadFrontBuffer = framebuffer.releaseFrontBuffer();
     Serial.printf("OTA check: Free heap: %d bytes, largest block: %d bytes\n",
                   ESP.getFreeHeap(), ESP.getMaxAllocHeap());
@@ -599,13 +606,21 @@ void otaCheckTask(void* param) {
         delay(500);
         framebuffer.reacquireFrontBuffer();
     }
+}
+
+void otaCheckTask(void* param) {
+    OTACheckTaskParams* p = (OTACheckTaskParams*)param;
+    bool force = p->force;
+    delete p;
+
+    otaCheckRun(force);  // all locals (incl. GitHubRelease) destroyed on return
 
     otaTaskRunning = false;
     vTaskDelete(NULL);
 }
 
-// Auto-update task: check and install if newer version is available
-void otaAutoUpdateTask(void* param) {
+// Auto-update: check and install if newer version is available
+static void otaAutoUpdateRun() {
     bool hadFrontBuffer = framebuffer.releaseFrontBuffer();
     Serial.println("Auto-update: checking for new firmware...");
     bool hasUpdate = otaManager.checkForUpdates(false);
@@ -650,6 +665,10 @@ void otaAutoUpdateTask(void* param) {
         delay(500);
         framebuffer.reacquireFrontBuffer();
     }
+}
+
+void otaAutoUpdateTask(void* param) {
+    otaAutoUpdateRun();  // all locals (incl. GitHubRelease) destroyed on return
 
     otaTaskRunning = false;
     vTaskDelete(NULL);
@@ -1037,6 +1056,48 @@ void setupMDNS() {
     }
 }
 
+// ============ Network services / Wi-Fi retry ============
+
+// NTP + mDNS, once the device has joined the saved network.
+void startNetworkServices() {
+    // Sync time via NTP (needed for scheduled auto-updates at 2 AM)
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    Serial.println("NTP time sync initiated");
+
+    setupMDNS();
+}
+
+// Called from loop(). If the saved network was unreachable at boot, the
+// device sits in AP fallback mode; retry the saved network periodically and,
+// once joined, drop the AP and resume normal operation.
+void retryWifiIfOffline() {
+    if (wifiConnected || otaTaskRunning || !mySettings->isConfigured()) return;
+
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiConnected = true;
+        Serial.println("WiFi reconnected: " + WiFi.localIP().toString());
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+        startNetworkServices();
+        showStartupScreen(WiFi.localIP().toString());
+        return;
+    }
+
+    // Don't hop channels while someone is on the setup AP entering new
+    // credentials; a STA connect attempt would drop their connection.
+    if (WiFi.softAPgetStationNum() > 0) return;
+
+    unsigned long now = millis();
+    if (now - lastWifiRetry < WIFI_RETRY_INTERVAL_MS) return;
+    lastWifiRetry = now;
+
+    Serial.println("WiFi: retrying saved network: " + mySettings->connectionSettings.ssid);
+    WiFi.begin(
+        mySettings->connectionSettings.ssid.c_str(),
+        mySettings->connectionSettings.password.c_str()
+    );
+}
+
 // ============ Setup & Loop ============
 
 void setup() {
@@ -1197,12 +1258,7 @@ void setup() {
         wifiConnected = true;
         Serial.println("\nWiFi connected: " + WiFi.localIP().toString());
 
-        // Sync time via NTP (needed for scheduled auto-updates at 2 AM)
-        configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-        Serial.println("NTP time sync initiated");
-
-        // Setup mDNS
-        setupMDNS();
+        startNetworkServices();
 
         // Setup web server with all endpoints
         setupWebServer();
@@ -1213,11 +1269,17 @@ void setup() {
         Serial.println("AInk ready! Listening for commands...");
         Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
     } else {
-        Serial.println("\nWiFi connection failed - starting AP mode");
+        // Saved network not reachable right now (router rebooting, power
+        // blip, out of range). Open the setup AP so the owner can change
+        // credentials, but keep retrying the saved network from loop() so
+        // the device comes back on its own instead of staying offline
+        // until someone presses Reset.
+        Serial.println("\nWiFi connection failed - starting AP mode (will keep retrying saved network)");
         WiFi.mode(WIFI_AP_STA);
         WiFi.softAP("UkieLab-AInk");
         setupWebServer();
         showSetupScreen();
+        lastWifiRetry = millis();
     }
 
     // Don't call mrd->stop() here — it would clear the reset counter before
@@ -1227,6 +1289,8 @@ void setup() {
 void loop() {
     mrd->loop();
     mySettings->loop();
+
+    retryWifiIfOffline();
 
     // Check scheduled auto-update (throttled to once per minute)
     if (wifiConnected && autoUpdateEnabled && !otaTaskRunning) {
