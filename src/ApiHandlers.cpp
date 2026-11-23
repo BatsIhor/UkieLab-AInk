@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <SPIFFS.h>
+#include <esp_system.h>
 
 // Static body accumulators for async request handling
 static String canvasBody;
@@ -50,8 +51,19 @@ static void imageDecodeTask(void* param)
         // Large image: write to SPIFFS, free buffer, decode from file
         Serial.printf("Image decode: via SPIFFS (%u bytes)\n", pngLen);
 
-        File f = SPIFFS.open(TEMP_IMG_PATH, "w");
-        if (!f) {
+        // Keep the File object in its own scope: vTaskDelete() below never
+        // returns, so a File still in scope there would never be destroyed.
+        bool opened = false;
+        size_t written = 0;
+        {
+            File f = SPIFFS.open(TEMP_IMG_PATH, "w");
+            if (f) {
+                opened = true;
+                written = f.write(p->decodeParams.pngData, pngLen);
+                f.close();
+            }
+        }
+        if (!opened) {
             p->result = {false, 0, 0, "Failed to open temp file for write"};
             free(const_cast<uint8_t*>(p->decodeParams.pngData));
             imageUploadBuf = nullptr;
@@ -59,8 +71,6 @@ static void imageDecodeTask(void* param)
             vTaskDelete(nullptr);
             return;
         }
-        size_t written = f.write(p->decodeParams.pngData, pngLen);
-        f.close();
         Serial.printf("Image decode: wrote %u/%u bytes to SPIFFS\n", written, pngLen);
 
         // Free upload buffer — returns ~48KB to heap for PNG decoder
@@ -666,11 +676,34 @@ void ApiHandlers::handleDeleteZones(AsyncWebServerRequest* req, Context& ctx)
     req->send(200, "application/json", "{\"status\":\"ok\"}");
 }
 
+// Human-readable name for the cause of the last reset (esp_reset_reason()).
+// Exposed in GET /health so owners can tell brownouts, watchdog resets and
+// crashes apart without a serial cable.
+static const char* resetReasonName(esp_reset_reason_t r)
+{
+    switch (r) {
+        case ESP_RST_POWERON:   return "power_on";
+        case ESP_RST_EXT:       return "external_pin";
+        case ESP_RST_SW:        return "software";
+        case ESP_RST_PANIC:     return "panic";
+        case ESP_RST_INT_WDT:   return "interrupt_watchdog";
+        case ESP_RST_TASK_WDT:  return "task_watchdog";
+        case ESP_RST_WDT:       return "other_watchdog";
+        case ESP_RST_DEEPSLEEP: return "deep_sleep_wake";
+        case ESP_RST_BROWNOUT:  return "brownout";
+        case ESP_RST_SDIO:      return "sdio";
+        default:                return "unknown";
+    }
+}
+
 void ApiHandlers::handleGetHealth(AsyncWebServerRequest* req, Context& ctx)
 {
     DynamicJsonDocument doc(1024);
 
     doc["uptime_ms"] = millis();
+    esp_reset_reason_t rr = esp_reset_reason();
+    doc["reset_reason"] = resetReasonName(rr);
+    doc["reset_reason_code"] = (int)rr;
     doc["free_heap"] = ESP.getFreeHeap();
     doc["min_free_heap"] = ESP.getMinFreeHeap();
     doc["largest_free_block"] = ESP.getMaxAllocHeap();
